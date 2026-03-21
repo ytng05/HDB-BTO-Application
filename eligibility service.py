@@ -16,7 +16,7 @@ app.config['SWAGGER'] = {
     'title': 'Eligibility Service API',
     'version': 1.0,
     "openapi": "3.0.2",
-    'description': 'Checks BTO applicant eligibility by calling ICA, IRAS, CPF Board, and SLA APIs (Steps 7-9)'
+    'description': 'Checks BTO applicant eligibility by calling ICA, IRAS, CPF Board, and SLA APIs'
 }
 swagger = Swagger(app)
 
@@ -69,7 +69,6 @@ class EligibilityCheck(db.Model):
         }
 
 def check_ica(nric):
-    """Step 7 / 8a – Verify Citizenship / PR Status via ICA API (HTTP GET)."""
     try:
         resp = requests.get(f"{ICA_API_URL}/citizenship/verify/{nric}", timeout=10)
         if resp.status_code == 200:
@@ -80,7 +79,6 @@ def check_ica(nric):
 
 
 def check_iras(nric):
-    """Step 8b – Verify Income via IRAS API (HTTP GET)."""
     try:
         resp = requests.get(f"{IRAS_API_URL}/income/verify/{nric}", timeout=10)
         if resp.status_code == 200:
@@ -91,7 +89,6 @@ def check_iras(nric):
 
 
 def check_cpf(nric):
-    """Step 8c – Verify CPF Withdrawals / Previous Housing Grants via CPF Board API (HTTP GET)."""
     try:
         resp = requests.get(f"{CPF_API_URL}/housing_grants/verify/{nric}", timeout=10)
         if resp.status_code == 200:
@@ -102,7 +99,6 @@ def check_cpf(nric):
 
 
 def check_sla(nric):
-    """Step 8d – Check for Existing Properties via SLA API (HTTP GET)."""
     try:
         resp = requests.get(f"{SLA_API_URL}/property/verify/{nric}", timeout=10)
         if resp.status_code == 200:
@@ -113,7 +109,6 @@ def check_sla(nric):
 
 
 def check_hfe(application_id, nric, flat_type):
-    """Step 9 – Check HFE matches information stored in official classes (HTTP GET)."""
     try:
         resp = requests.get(
             f"{HFE_SERVICE_URL}/hfe/verify",
@@ -170,9 +165,6 @@ def find_by_id(check_id):
 @app.route("/eligibility/check", methods=['POST'])
 def check_eligibility():
     """
-    Run full eligibility check for a BTO ballot application (Steps 6-11)
-    Calls ICA (8a), IRAS (8b), CPF Board (8c), SLA (8d), HFEApplication (9) internally.
-    ---
     requestBody:
         required: true
         content:
