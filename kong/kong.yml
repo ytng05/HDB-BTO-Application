@@ -1,0 +1,71 @@
+_format_version: "3.0"
+
+services:
+  # Applicant Service
+  - name: applicant-service
+    url: http://applicant:5001
+    routes:
+      - name: applicant-route
+        paths:
+          - /api/applicant
+        strip_path: true
+
+  # Flat Availability Service
+  - name: flat-availability-service
+    url: http://flat_availability:5006
+    routes:
+      - name: flat-availability-route
+        paths:
+          - /api/flats
+        strip_path: true
+
+  # Flat Selection Service
+  - name: flat-selection-service
+    url: http://flat_selection:5002
+    routes:
+      - name: flat-selection-route
+        paths:
+          - /api/flat-selection
+        strip_path: true
+
+  # NETS Payment Service
+  - name: nets-payment-service
+    url: http://nets_payment:5003
+    routes:
+      - name: nets-payment-route
+        paths:
+          - /api/payment
+        strip_path: true
+
+  # Flat Allocation Service (Orchestrator)
+  - name: flat-allocation-service
+    url: http://flat_allocation:5005
+    routes:
+      - name: flat-allocation-route
+        paths:
+          - /api/allocate
+        strip_path: true
+
+  # Notification Service
+  - name: notification-service
+    url: http://notification:5004
+    routes:
+      - name: notification-route
+        paths:
+          - /api/notification
+        strip_path: true
+
+plugins:
+  # Rate limiting on flat allocation (prevent spam selection attempts)
+  - name: rate-limiting
+    service: flat-allocation-service
+    config:
+      minute: 10
+      policy: local
+
+  # Rate limiting on payment (prevent abuse)
+  - name: rate-limiting
+    service: nets-payment-service
+    config:
+      minute: 5
+      policy: local
