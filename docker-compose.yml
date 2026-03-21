@@ -1,0 +1,111 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ""
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+    volumes:
+      - ./applicant/applicant.sql:/docker-entrypoint-initdb.d/01-applicant.sql:ro
+      - ./flat_availability/flat_availability.sql:/docker-entrypoint-initdb.d/02-flat_availability.sql:ro
+      - ./flat_selection/flat_selection.sql:/docker-entrypoint-initdb.d/03-flat_selection.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  applicant:
+    build: ./applicant
+    container_name: applicant
+    ports:
+      - "5001:5001"
+    environment:
+      SQLALCHEMY_DATABASE_URI: mysql+mysqlconnector://root@mysql:3306/applicant
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  flat_selection:
+    build: ./flat_selection
+    container_name: flat_selection
+    ports:
+      - "5002:5002"
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://root@mysql:3306/flat_selection
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  nets_payment:
+    build: ./nets_payment
+    container_name: nets_payment
+    ports:
+      - "5003:5003"
+
+  notification:
+    build: ./notification
+    container_name: notification
+    ports:
+      - "5004:5004"
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+    depends_on:
+      rabbitmq:
+        condition: service_started
+
+  flat_allocation:
+    build: ./flat_allocation
+    container_name: flat_allocation
+    ports:
+      - "5005:5005"
+    environment:
+      FLAT_AVAILABILITY_URL: http://flat_availability:5006
+      APPLICANT_URL: http://applicant:5001
+      FLAT_SELECTION_URL: http://flat_selection:5002
+      NETS_PAYMENT_URL: http://nets_payment:5003
+      NOTIFICATION_URL: http://notification:5004
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+    depends_on:
+      applicant:
+        condition: service_started
+      flat_selection:
+        condition: service_started
+      nets_payment:
+        condition: service_started
+      notification:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+
+  flat_availability:
+    build: ./flat_availability
+    container_name: flat_availability
+    ports:
+      - "5006:5006"
+    environment:
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_USER: root
+      DB_PASSWORD: ""
+      DB_NAME: flat_availability
+    depends_on:
+      mysql:
+        condition: service_healthy
