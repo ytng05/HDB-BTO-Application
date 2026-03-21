@@ -9,9 +9,10 @@ CORS(app)
 
 # Service URLs - env vars for Docker, localhost for local dev
 FLAT_AVAILABILITY_URL = os.environ.get('FLAT_AVAILABILITY_URL', 'http://localhost:5001')
-APPLICATION_URL = os.environ.get('APPLICATION_URL', 'http://localhost:5002')
-NETS_PAYMENT_URL = os.environ.get('NETS_PAYMENT_URL', 'http://localhost:5003')
-NOTIFICATION_URL = os.environ.get('NOTIFICATION_URL', 'http://localhost:5004')
+APPLICANT_URL = os.environ.get('APPLICANT_URL', 'http://localhost:5003')
+FLAT_SELECTION_URL = os.environ.get('FLAT_SELECTION_URL', 'http://localhost:5002')
+NETS_PAYMENT_URL = os.environ.get('NETS_PAYMENT_URL', 'http://localhost:5004')
+NOTIFICATION_URL = os.environ.get('NOTIFICATION_URL', 'http://localhost:5005')
 
 RABBITMQ_HOST = os.environ.get('RABBITMQ_HOST', 'localhost')
 RABBITMQ_PORT = int(os.environ.get('RABBITMQ_PORT', 5672))
@@ -75,7 +76,7 @@ def publish_event(routing_key, message):
 #             -> publish PaymentFailed (20b) -> return failure (21b)
 #
 # Body: {
-#   "application_id": "APP-2025-001",
+#   "applicant_id": "APP-2025-001",
 #   "flat_id": 1,
 #   "payment_amount": 2000.00
 # }
@@ -85,7 +86,7 @@ def select_flat():
     data = request.get_json()
 
     # Validate input
-    required = ['application_id', 'flat_id', 'payment_amount']
+    required = ['applicant_id', 'selection_id', 'flat_id', 'payment_amount']
     for field in required:
         if not data or field not in data:
             return jsonify({
@@ -93,13 +94,14 @@ def select_flat():
                 "message": f"{field} is required."
             }), 400
 
-    application_id = data['application_id']
+    applicant_id = data['applicant_id']
+    selection_id = data['selection_id']
     flat_id = data['flat_id']
     payment_amount = float(data['payment_amount'])
 
     print(f"\n{'='*60}")
     print(f"[ORCHESTRATOR] Starting flat selection")
-    print(f"  Application: {application_id}")
+    print(f"  Application: {applicant_id}")
     print(f"  Flat: {flat_id}")
     print(f"  Payment: ${payment_amount}")
     print(f"{'='*60}")
@@ -142,7 +144,7 @@ def select_flat():
     try:
         reserve_response = requests.put(
             f"{FLAT_AVAILABILITY_URL}/flats/{flat_id}/reserve",
-            json={"applicant_id": application_id}
+            json={"applicant_id": applicant_id, "selection_id": selection_id}
         )
         reserve_data = reserve_response.json()
     except Exception as e:
@@ -164,10 +166,10 @@ def select_flat():
     # ----------------------------------------------------------
     # Step 10: Update applicant's flat reservation details
     # ----------------------------------------------------------
-    print(f"\n[Step 10] Updating application {application_id} with flat {flat_id}...")
+    print(f"\n[Step 10] Updating flat selection {selection_id} with flat {flat_id}...")
     try:
         app_response = requests.put(
-            f"{APPLICATION_URL}/applications/{application_id}/reserve",
+            f"{FLAT_SELECTION_URL}/flat-selection/{selection_id}/reserve",
             json={"flat_id": flat_id}
         )
         app_data = app_response.json()
@@ -186,7 +188,7 @@ def select_flat():
         requests.put(f"{FLAT_AVAILABILITY_URL}/flats/{flat_id}/unreserve")
         return jsonify({
             "code": app_data.get('code', 500),
-            "message": app_data.get('message', 'Failed to update application.')
+            "message": app_data.get('message', 'Failed to update applicant.')
         }), app_response.status_code
 
     print(f"[Step 11] Application updated successfully")
@@ -199,7 +201,7 @@ def select_flat():
         payment_response = requests.post(
             f"{NETS_PAYMENT_URL}/payment",
             json={
-                "applicant_id": application_id,
+                "applicant_id": applicant_id,
                 "amount": payment_amount,
                 "description": f"BTO Option Fee for Flat {flat_id}"
             }
@@ -209,7 +211,7 @@ def select_flat():
         # Compensation: unreserve flat + undo application
         print(f"[COMPENSATION] Payment Service failed. Rolling back...")
         requests.put(f"{FLAT_AVAILABILITY_URL}/flats/{flat_id}/unreserve")
-        requests.put(f"{APPLICATION_URL}/applications/{application_id}/undo-reserve")
+        requests.put(f"{FLAT_SELECTION_URL}/flat-selection/{selection_id}/undo-reserve")
         return jsonify({
             "code": 503,
             "message": f"Payment Service unavailable: {str(e)}"
@@ -224,7 +226,7 @@ def select_flat():
 
         # Get applicant details for notification
         try:
-            applicant_resp = requests.get(f"{APPLICATION_URL}/applications/{application_id}")
+            applicant_resp = requests.get(f"{APPLICANT_URL}/applicant/{applicant_id}")
             applicant_info = applicant_resp.json().get('data', {})
         except:
             applicant_info = {}
@@ -232,12 +234,12 @@ def select_flat():
         # Step 16a: Publish FlatConfirmed event via RabbitMQ
         print(f"[Step 16a] Publishing FlatConfirmed event...")
         publish_event('flat.confirmed', {
-            "application_id": application_id,
+            "applicant_id": applicant_id,
             "flat_id": flat_id,
             "transaction_id": transaction_id,
             "amount": payment_amount,
             "email": applicant_info.get('email', ''),
-            "phone": applicant_info.get('phone', '')
+            "phone": applicant_info.get('mobile_number', '')
         })
 
         # Step 17a: Return success to HDB Portal
@@ -245,7 +247,7 @@ def select_flat():
         return jsonify({
             "code": 200,
             "data": {
-                "application_id": application_id,
+                "applicant_id": applicant_id,
                 "flat_id": flat_id,
                 "flat_details": flat_info,
                 "transaction_id": transaction_id,
@@ -266,12 +268,12 @@ def select_flat():
         requests.put(f"{FLAT_AVAILABILITY_URL}/flats/{flat_id}/unreserve")
 
         # Step 18b: Undo applicant reservation
-        print(f"[Step 18b] Undoing application reservation...")
-        requests.put(f"{APPLICATION_URL}/applications/{application_id}/undo-reserve")
+        print(f"[Step 18b] Undoing applicant reservation...")
+        requests.put(f"{FLAT_SELECTION_URL}/flat-selection/{selection_id}/undo-reserve")
 
         # Get applicant details for notification
         try:
-            applicant_resp = requests.get(f"{APPLICATION_URL}/applications/{application_id}")
+            applicant_resp = requests.get(f"{APPLICANT_URL}/applicant/{applicant_id}")
             applicant_info = applicant_resp.json().get('data', {})
         except:
             applicant_info = {}
@@ -279,12 +281,12 @@ def select_flat():
         # Step 20b: Publish PaymentFailed event via RabbitMQ
         print(f"[Step 20b] Publishing PaymentFailed event...")
         publish_event('payment.failed', {
-            "application_id": application_id,
+            "applicant_id": applicant_id,
             "flat_id": flat_id,
             "amount": payment_amount,
             "reason": payment_data.get('data', {}).get('message', 'Payment failed'),
             "email": applicant_info.get('email', ''),
-            "phone": applicant_info.get('phone', '')
+            "phone": applicant_info.get('mobile_number', '')
         })
 
         # Step 21b: Return failure to HDB Portal
@@ -292,7 +294,7 @@ def select_flat():
         return jsonify({
             "code": 402,
             "data": {
-                "application_id": application_id,
+                "applicant_id": applicant_id,
                 "flat_id": flat_id,
                 "status": "payment_failed",
                 "message": "Payment failed. Flat reservation has been cancelled. Please try again."
