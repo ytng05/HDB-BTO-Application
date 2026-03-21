@@ -8,11 +8,11 @@ app = Flask(__name__)
 CORS(app)
 
 # Service URLs - env vars for Docker, localhost for local dev
-FLAT_AVAILABILITY_URL = os.environ.get('FLAT_AVAILABILITY_URL', 'http://localhost:5001')
-APPLICANT_URL = os.environ.get('APPLICANT_URL', 'http://localhost:5003')
+FLAT_AVAILABILITY_URL = os.environ.get('FLAT_AVAILABILITY_URL', 'http://localhost:5006')
+APPLICANT_URL = os.environ.get('APPLICANT_URL', 'http://localhost:5001')
 FLAT_SELECTION_URL = os.environ.get('FLAT_SELECTION_URL', 'http://localhost:5002')
-NETS_PAYMENT_URL = os.environ.get('NETS_PAYMENT_URL', 'http://localhost:5004')
-NOTIFICATION_URL = os.environ.get('NOTIFICATION_URL', 'http://localhost:5005')
+NETS_PAYMENT_URL = os.environ.get('NETS_PAYMENT_URL', 'http://localhost:5003')
+NOTIFICATION_URL = os.environ.get('NOTIFICATION_URL', 'http://localhost:5004')
 
 RABBITMQ_HOST = os.environ.get('RABBITMQ_HOST', 'localhost')
 RABBITMQ_PORT = int(os.environ.get('RABBITMQ_PORT', 5672))

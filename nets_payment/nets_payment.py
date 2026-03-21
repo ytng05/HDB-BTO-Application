@@ -28,7 +28,7 @@ def call_nets_api(amount, applicant_id, description):
     We simulate a 90% success rate.
     """
     # Simulate external API call
-    success = False # 90% success rate
+    success = random.random() < 0.9 # 90% success rate
     
     if success:
         # Simulated transaction ID from NETS
