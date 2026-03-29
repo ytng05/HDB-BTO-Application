@@ -1,0 +1,20 @@
+* text=auto eol=lf
+
+# Keep binaries untouched
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.7z binary
+
+Dockerfile text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.txt text eol=lf
+*.sh text eol=lf
+requirements.txt text eol=lf
