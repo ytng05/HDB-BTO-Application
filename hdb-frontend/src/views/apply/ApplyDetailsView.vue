@@ -44,7 +44,7 @@ function goNext() {
 <template>
   <div class="surface step-card">
     <div class="step-card__copy">
-      <h2>Step 2 &mdash; Personal Details</h2>
+      <h2>Step 1 &mdash; Personal Details</h2>
       <p>Retrieve your information from SingPass or fill in the details manually.</p>
     </div>
 
@@ -122,7 +122,7 @@ function goNext() {
     </div>
 
     <div class="step-actions">
-      <button class="btn btn-secondary" type="button" @click="router.push('/apply/login')">Back</button>
+      <button class="btn btn-secondary" type="button" @click="router.push('/')">Back</button>
       <button class="btn btn-primary" type="button" @click="goNext">Next</button>
     </div>
   </div>

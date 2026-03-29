@@ -3,10 +3,9 @@ import HomeView from '@/views/HomeView.vue'
 import ApplyLayout from '@/views/ApplyLayout.vue'
 import FlatSelectionView from '@/views/FlatSelectionView.vue'
 import PaymentConfirmationView from '@/views/PaymentConfirmationView.vue'
-import ApplyLoginView from '@/views/apply/ApplyLoginView.vue'
 import ApplyDetailsView from '@/views/apply/ApplyDetailsView.vue'
 import ApplyDocumentsView from '@/views/apply/ApplyDocumentsView.vue'
-import ApplyReviewView from '@/views/apply/ApplyReviewView.vue'
+import ApplyPaymentView from '@/views/apply/ApplyPaymentView.vue'
 import { useAuth } from '@/stores/auth'
 import { useApplicationStore } from '@/stores/application'
 import { pinia } from '@/stores/pinia'
@@ -32,7 +31,7 @@ const router = createRouter({
     },
     {
       path: '/login',
-      redirect: '/apply/login',
+      redirect: '/',
     },
     {
       path: '/apply',
@@ -40,22 +39,19 @@ const router = createRouter({
       children: [
         {
           path: '',
-          redirect: '/apply/login',
+          redirect: '/apply/details',
         },
         {
           path: 'login',
-          name: 'apply-login',
-          component: ApplyLoginView,
-          meta: {
-            applyStepIndex: 0,
-          },
+          redirect: '/',
         },
         {
           path: 'details',
           name: 'apply-details',
           component: ApplyDetailsView,
           meta: {
-            applyStepIndex: 1,
+            applyStepIndex: 0,
+            requiresAuth: true,
           },
         },
         {
@@ -63,15 +59,17 @@ const router = createRouter({
           name: 'apply-documents',
           component: ApplyDocumentsView,
           meta: {
-            applyStepIndex: 2,
+            applyStepIndex: 1,
+            requiresAuth: true,
           },
         },
         {
-          path: 'review',
-          name: 'apply-review',
-          component: ApplyReviewView,
+          path: 'payment',
+          name: 'apply-payment',
+          component: ApplyPaymentView,
           meta: {
-            applyStepIndex: 3,
+            applyStepIndex: 2,
+            requiresAuth: true,
           },
         },
       ],
@@ -106,30 +104,7 @@ router.beforeEach((to) => {
   restoreSession()
 
   if (to.meta.requiresAuth && !isLoggedIn.value) {
-    return {
-      path: '/apply/login',
-      query: {
-        redirect: to.fullPath,
-      },
-    }
-  }
-
-  if (to.name === 'apply-details' && !applicationStore.form.nric) {
-    return {
-      name: 'apply-login',
-    }
-  }
-
-  if (to.name === 'apply-documents' && !applicationStore.form.nric) {
-    return {
-      name: 'apply-login',
-    }
-  }
-
-  if (to.name === 'apply-review' && !applicationStore.form.nric) {
-    return {
-      name: 'apply-login',
-    }
+    return { path: '/' }
   }
 
   if (to.meta.requiresBallot && !applicationStore.hasBallotAccess) {

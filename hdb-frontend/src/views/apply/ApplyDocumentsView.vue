@@ -19,7 +19,7 @@ function handleFileChange(event: Event, documentKey: 'incomePdfName' | 'hfeLette
 <template>
   <div class="surface step-card">
     <div class="step-card__copy">
-      <h2>Step 3 &mdash; Document Upload</h2>
+      <h2>Step 2 &mdash; Document Review</h2>
       <p>Attach the required PDF documents for income assessment and HFE verification.</p>
     </div>
 
@@ -49,7 +49,7 @@ function handleFileChange(event: Event, documentKey: 'incomePdfName' | 'hfeLette
 
     <div class="step-actions">
       <button class="btn btn-secondary" type="button" @click="router.push('/apply/details')">Back</button>
-      <button class="btn btn-primary" type="button" :disabled="!applicationStore.hasRequiredDocuments" @click="router.push('/apply/review')">
+      <button class="btn btn-primary" type="button" :disabled="!applicationStore.hasRequiredDocuments" @click="router.push('/apply/payment')">
         Next
       </button>
     </div>

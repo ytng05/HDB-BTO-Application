@@ -5,7 +5,7 @@ import ApplicationProgress from '@/components/ApplicationProgress.vue'
 
 const route = useRoute()
 
-const steps = ['Login', 'Details', 'Documents', 'Review']
+const steps = ['Details', 'Documents', 'Payment']
 const activeIndex = computed(() => Number(route.meta.applyStepIndex ?? 0))
 </script>
 
@@ -15,7 +15,7 @@ const activeIndex = computed(() => Number(route.meta.applyStepIndex ?? 0))
       <header class="apply-header">
         <p class="eyebrow">Flat Application</p>
         <h1 class="page-title">Apply for Flat</h1>
-        <p class="page-subtitle">Complete your application in four guided steps.</p>
+        <p class="page-subtitle">Complete your application in three guided steps.</p>
       </header>
 
       <ApplicationProgress :steps="steps" :active-index="activeIndex" />

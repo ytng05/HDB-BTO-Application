@@ -51,16 +51,11 @@ const dashboardText = computed(() => {
 
 function startApplicationFlow() {
   if (applicationStore.status === 'processing') {
-    router.push('/apply/review')
+    router.push('/apply/payment')
     return
   }
 
-  if (applicationStore.form.nric) {
-    router.push('/apply/details')
-    return
-  }
-
-  router.push('/apply/login')
+  router.push('/apply/details')
 }
 
 function revealMockBallot() {
@@ -70,19 +65,17 @@ function revealMockBallot() {
 
 <template>
   <div>
-    <section class="section home-hero">
+    <section v-if="!isLoggedIn" class="section home-hero">
       <div class="container">
         <HeroCarousel :slides="heroSlides" />
 
         <div class="hero-actions">
-          <button class="btn btn-primary hero-actions__button" type="button" @click="startApplicationFlow">
-            Apply for Flat
-          </button>
+          <p class="hero-login-hint">Sign in with your NRIC to start your flat application.</p>
         </div>
       </div>
     </section>
 
-    <section id="dashboard" class="section dashboard-section">
+    <section v-if="isLoggedIn" id="dashboard" class="section dashboard-section">
       <div class="container">
         <div class="dashboard-header">
           <div>
@@ -168,13 +161,10 @@ function revealMockBallot() {
           </div>
         </div>
 
-        <div v-if="!isLoggedIn" class="dashboard-hint">
-          Applicant details are stored in the mocked application flow and will appear here after Step 1 login.
-        </div>
       </div>
     </section>
 
-    <section class="section section--muted">
+    <section id="launches" class="section section--muted">
       <div class="container">
         <p class="eyebrow">BTO Exercise</p>
         <h2 class="section-heading">Upcoming BTO Launches</h2>
@@ -202,11 +192,14 @@ function revealMockBallot() {
 .hero-actions {
   display: flex;
   justify-content: center;
-  margin-top: 28px;
+  margin-top: 20px;
 }
 
-.hero-actions__button {
-  min-width: 220px;
+.hero-login-hint {
+  margin: 0;
+  font-size: 0.96rem;
+  color: rgba(29, 29, 31, 0.6);
+  text-align: center;
 }
 
 .dashboard-header {
