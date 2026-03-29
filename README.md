@@ -98,6 +98,7 @@ Click **Login** in the navbar and enter an NRIC. Demo accounts:
 |---|---|
 | `S1234567A` | Aaron Tan |
 | `S7654321D` | Demo User |
+| `S9812379B` | LIM YONG XIANG |
 
 ### Apply for a Flat
 

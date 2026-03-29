@@ -132,6 +132,7 @@ function isActiveLink(linkId: string) {
           <strong>Demo NRICs:</strong>
           <button type="button" class="demo-pill" @click="nric = 'S1234567A'">S1234567A</button>
           <button type="button" class="demo-pill" @click="nric = 'S7654321D'">S7654321D</button>
+          <button type="button" class="demo-pill" @click="nric = 'S9812379B'">S9812379B</button>
         </div>
 
         <form @submit.prevent="handleLogin">
