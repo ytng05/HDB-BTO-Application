@@ -1,132 +1,30 @@
 services:
-  ballot-service:
+  ocr-service:
     build:
-      context: ./ballot
-    container_name: ballot_service
+      context: ./document
+      dockerfile: Dockerfile.ocr
+    container_name: ocr_service
     ports:
-      - "6001:5000"
-    restart: always
-  applicant-db:
-    image: mysql:8.0
-    container_name: applicant_db
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: applicant
-    ports:
-      - "3307:3306"
-    volumes:
-      - applicant_db_data:/var/lib/mysql
-      - ./applicant/applicant.sql:/docker-entrypoint-initdb.d/applicant.sql:ro
-    restart: always
-  applicant-service:
-    build:
-      context: ./applicant
-    container_name: applicant_service
-    ports:
-      - "6002:5001"
-    environment:
-      DATABASE_URL: mysql+mysqlconnector://root:root@applicant-db:3306/applicant
-    depends_on:
-      - applicant-db
-    restart: always
-  ballot-audits-db:
-    image: mysql:8.0
-    container_name: ballot_audits_db
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: ballot_audits
-    ports:
-      - "3308:3306"
-    volumes:
-      - ballot_audits_db_data:/var/lib/mysql
-      - ./ballot-audits/ballot_audits.sql:/docker-entrypoint-initdb.d/ballot_audits.sql:ro
-    restart: always
-  ballot-audits-service:
-    build:
-      context: ./ballot-audits
-    container_name: ballot_audits_service
-    ports:
-      - "6003:5000"
-    environment:
-      DATABASE_URL: mysql+mysqlconnector://root:root@ballot-audits-db:3306/ballot_audits
-    depends_on:
-      - ballot-audits-db
-    restart: always
-  projects-db:
-    image: mysql:8.0
-    container_name: projects_db
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: projects
-    ports:
-      - "3309:3306"
-    volumes:
-      - projects_db_data:/var/lib/mysql
-      - ./projects/projects.sql:/docker-entrypoint-initdb.d/projects.sql:ro
-    restart: always
-  projects-service:
-    build:
-      context: ./projects
-    container_name: projects_service
-    ports:
-      - "6004:5000"
-    environment:
-      DATABASE_URL: mysql+mysqlconnector://root:root@projects-db:3306/projects
-    depends_on:
-      - projects-db
-    restart: always
-  flat-selection-db:
-    image: mysql:8.0
-    container_name: flat_selection_db
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: flat_selection
-    ports:
-      - "3310:3306"
-    volumes:
-      - flat_selection_db_data:/var/lib/mysql
-      - ./flat_selection/flat_selection.sql:/docker-entrypoint-initdb.d/flat_selection.sql:ro
-    restart: always
-  flat-selection-service:
-    build:
-      context: ./flat_selection
-      dockerfile: Dockerfile.txt
-    container_name: flat_selection_service
-    ports:
-      - "6005:5002"
-    environment:
-      DATABASE_URL: mysql+mysqlconnector://root:root@flat-selection-db:3306/flat_selection
-    depends_on:
-      - flat-selection-db
-    restart: always
-  flats-db:
-    image: mysql:8.0
-    container_name: flats_db
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: flats
-    ports:
-      - "3311:3306"
-    volumes:
-      - flats_db_data:/var/lib/mysql
-      - ./flats/flats.sql:/docker-entrypoint-initdb.d/flats.sql:ro
-    restart: always
-  flats-service:
-    build:
-      context: ./flats
-      dockerfile: Dockerfile.txt
-    container_name: flats_service
-    ports:
-      - "6006:5006"
-    environment:
-      DATABASE_URL: mysql+mysqlconnector://root:root@flats-db:3306/flats
-    depends_on:
-      - flats-db
+      - "5050:5050"
     restart: always
 
-volumes:
-  applicant_db_data:
-  ballot_audits_db_data:
-  projects_db_data:
-  flat_selection_db_data:
-  flats_db_data:
+  nets-payment-service:
+    build:
+      context: ./nets_payment
+      dockerfile: Dockerfile.txt
+    container_name: nets_payment_service
+    ports:
+      - "5003:5003"
+    environment:
+      NETS_API_KEY_ID: ${NETS_API_KEY_ID:-your-api-key-id}
+      NETS_SECRET_KEY: ${NETS_SECRET_KEY:-your-secret-key}
+      NETS_MID: ${NETS_MID:-your-umid}
+      NETS_ENVIRONMENT: ${NETS_ENVIRONMENT:-uat}
+      NETS_CALLBACK_BASE: ${NETS_CALLBACK_BASE:-http://localhost:5003}
+      NETS_B2S_CALLBACK_URL: ${NETS_B2S_CALLBACK_URL:-}
+      NETS_S2S_CALLBACK_URL: ${NETS_S2S_CALLBACK_URL:-}
+      NETS_QUERY_URL: ${NETS_QUERY_URL:-}
+      NETS_IP_ADDRESS: ${NETS_IP_ADDRESS:-}
+      NETS_MERCHANT_TIMEZONE: ${NETS_MERCHANT_TIMEZONE:-+8:00}
+      HDB_PORTAL_URL: ${HDB_PORTAL_URL:-http://localhost:5173}
+    restart: always

@@ -2,7 +2,7 @@ import axios from 'axios'
 
 export const APPLICANT_URL = 'http://localhost:5001'
 export const FLAT_SELECTION_URL = 'http://localhost:5002'
-export const NETS_PAYMENT_URL = 'http://localhost:5003'
+export const NETS_PAYMENT_URL = import.meta.env.VITE_NETS_URL ?? 'http://localhost:5003'
 export const FLAT_ALLOCATION_URL = 'http://localhost:5005'
 export const FLAT_AVAILABILITY_URL = 'http://localhost:5006'
 
@@ -76,6 +76,22 @@ export interface PaymentServicePayload {
   status?: string
 }
 
+export interface PaymentStatusData {
+  applicant_id?: string | number
+  amount?: number
+  transaction_id?: string | number | null
+  merchant_txn_ref: string
+  status: string
+  stage_resp_code?: string
+  action_code?: string
+  bank_auth_id?: string
+  mask_pan?: string
+  message?: string
+  query_raw_status?: string
+  verification_source?: string
+  query_error?: string
+}
+
 export interface SelectFlatServicePayload {
   transaction_id?: string | number
   transactionId?: string | number
@@ -107,6 +123,11 @@ const flatAvailabilityApi = axios.create({
 const flatAllocationApi = axios.create({
   baseURL: FLAT_ALLOCATION_URL,
   timeout: 15000,
+})
+
+const netsPaymentApi = axios.create({
+  baseURL: NETS_PAYMENT_URL,
+  timeout: 20000,
 })
 
 function isApiEnvelope<T>(payload: ApiEnvelope<T> | T): payload is ApiEnvelope<T> {
@@ -189,5 +210,27 @@ export async function getAvailableFlats(projectId: number): Promise<FlatRecord[]
 
 export async function selectFlat(payload: SelectFlatRequest): Promise<SelectFlatServicePayload> {
   const response = await flatAllocationApi.post<SelectFlatResponse>('/select-flat', payload)
+  return unwrapApiData(response.data)
+}
+
+export async function getPaymentStatus(
+  merchantTxnRef: string,
+  refresh = false,
+): Promise<PaymentStatusData> {
+  const response = await netsPaymentApi.get<ApiEnvelope<PaymentStatusData>>(
+    `/payment/status/${encodeURIComponent(merchantTxnRef)}`,
+    {
+      params: refresh ? { refresh: 'true' } : undefined,
+    },
+  )
+
+  return unwrapApiData(response.data)
+}
+
+export async function abandonPayment(merchantTxnRef: string): Promise<PaymentStatusData> {
+  const response = await netsPaymentApi.post<ApiEnvelope<PaymentStatusData>>(
+    `/payment/abandon/${encodeURIComponent(merchantTxnRef)}`,
+  )
+
   return unwrapApiData(response.data)
 }

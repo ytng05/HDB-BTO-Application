@@ -1,76 +1,104 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApplicationStore } from '@/stores/application'
 
 const router = useRouter()
 const applicationStore = useApplicationStore()
 
-function handleSubmit() {
-  applicationStore.submitApplication()
-  router.push({
-    path: '/',
-    hash: '#dashboard',
-  })
+const isSubmitted = computed(() => applicationStore.hasSubmitted)
+const heading = computed(() => (isSubmitted.value ? 'Application Review' : 'Review Your Details'))
+const description = computed(() =>
+  isSubmitted.value
+    ? 'This is the information currently stored for your application.'
+    : 'Review the information below before proceeding to payment.',
+)
+const primaryLabel = computed(() => (isSubmitted.value ? 'Back to Dashboard' : 'Proceed to Payment'))
+
+function handlePrimaryAction() {
+  if (isSubmitted.value) {
+    router.push({
+      path: '/',
+      hash: '#dashboard',
+    })
+    return
+  }
+
+  router.push('/apply/payment')
 }
 </script>
 
 <template>
   <div class="surface step-card">
     <div class="step-card__copy">
-      <h2>Step 4 &mdash; Review &amp; Submit</h2>
-      <p>Confirm the information below before submitting your flat application.</p>
+      <h2>{{ heading }}</h2>
+      <p>{{ description }}</p>
     </div>
 
     <div class="review-grid">
       <div class="surface review-card">
         <p class="detail-label">Full Name</p>
-        <p class="detail-value">{{ applicationStore.form.fullName }}</p>
+        <p class="detail-value">{{ applicationStore.form.fullName || 'Not provided' }}</p>
       </div>
       <div class="surface review-card">
         <p class="detail-label">NRIC</p>
-        <p class="detail-value">{{ applicationStore.form.nric }}</p>
+        <p class="detail-value">{{ applicationStore.form.nric || 'Not provided' }}</p>
       </div>
       <div class="surface review-card">
         <p class="detail-label">Date of Birth</p>
-        <p class="detail-value">{{ applicationStore.form.dateOfBirth }}</p>
+        <p class="detail-value">{{ applicationStore.form.dateOfBirth || 'Not provided' }}</p>
       </div>
       <div class="surface review-card">
         <p class="detail-label">Contact Number</p>
-        <p class="detail-value">{{ applicationStore.form.contactNumber }}</p>
+        <p class="detail-value">{{ applicationStore.form.contactNumber || 'Not provided' }}</p>
       </div>
       <div class="surface review-card">
         <p class="detail-label">Email</p>
-        <p class="detail-value">{{ applicationStore.form.email }}</p>
+        <p class="detail-value">{{ applicationStore.form.email || 'Not provided' }}</p>
       </div>
       <div class="surface review-card">
         <p class="detail-label">Marital Status</p>
-        <p class="detail-value">{{ applicationStore.form.maritalStatus }}</p>
+        <p class="detail-value">{{ applicationStore.form.maritalStatus || 'Not provided' }}</p>
       </div>
       <div class="surface review-card">
         <p class="detail-label">Monthly Household Income</p>
-        <p class="detail-value">${{ applicationStore.form.monthlyHouseholdIncome }}</p>
+        <p class="detail-value">
+          {{ applicationStore.form.monthlyHouseholdIncome ? `$${applicationStore.form.monthlyHouseholdIncome}` : 'Not provided' }}
+        </p>
       </div>
       <div class="surface review-card">
         <p class="detail-label">Preferred Town Area</p>
-        <p class="detail-value">{{ applicationStore.form.preferredTown }}</p>
+        <p class="detail-value">{{ applicationStore.form.preferredTown || 'Not selected' }}</p>
       </div>
       <div class="surface review-card">
         <p class="detail-label">Flat Type</p>
-        <p class="detail-value">{{ applicationStore.form.flatType }}</p>
+        <p class="detail-value">{{ applicationStore.form.flatType || 'Not selected' }}</p>
       </div>
       <div class="surface review-card">
         <p class="detail-label">Income PDF</p>
-        <p class="detail-value">{{ applicationStore.documents.incomePdfName }}</p>
+        <p class="detail-value">{{ applicationStore.documents.incomePdfName || 'Not uploaded' }}</p>
       </div>
       <div class="surface review-card">
         <p class="detail-label">HFE Letter PDF</p>
-        <p class="detail-value">{{ applicationStore.documents.hfeLetterPdfName }}</p>
+        <p class="detail-value">{{ applicationStore.documents.hfeLetterPdfName || 'Not uploaded' }}</p>
+      </div>
+      <div class="surface review-card">
+        <p class="detail-label">Submitted At</p>
+        <p class="detail-value">{{ applicationStore.lastSubmittedAt || 'Not submitted yet' }}</p>
       </div>
     </div>
 
     <div class="step-actions">
-      <button class="btn btn-secondary" type="button" @click="router.push('/apply/documents')">Back</button>
-      <button class="btn btn-primary" type="button" @click="handleSubmit">Apply</button>
+      <button
+        class="btn btn-secondary"
+        type="button"
+        @click="router.push(isSubmitted ? '/' : '/apply/documents')"
+      >
+        {{ isSubmitted ? 'Return Home' : 'Back' }}
+      </button>
+      <button class="btn btn-primary" type="button" @click="handlePrimaryAction">
+        {{ primaryLabel }}
+      </button>
     </div>
   </div>
 </template>
@@ -100,6 +128,23 @@ function handleSubmit() {
 
 .review-card {
   padding: 18px;
+}
+
+.detail-label {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(29, 29, 31, 0.56);
+}
+
+.detail-value {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-charcoal);
+  word-break: break-word;
 }
 
 .step-actions {

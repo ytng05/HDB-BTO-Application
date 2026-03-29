@@ -10,7 +10,7 @@
  */
 import raw from './v3.json'
 
-export const myinfoPersonas = raw.personas as Record<string, MyInfoPersona>
+export const myinfoPersonas = raw.personas as unknown as Record<string, MyInfoPersona>
 
 // ─── MyInfo v3 field shapes ───────────────────────────────────────────────────
 

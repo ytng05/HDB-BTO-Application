@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Building2, CheckCircle2, Hash, MapPinned, Ruler, SunMedium } from 'lucide-vue-next'
+import { Building2, Hash, MapPinned, Ruler, SunMedium, CheckCircle2 } from 'lucide-vue-next'
 import SelectionModal from '@/components/SelectionModal.vue'
 import { useApplicationStore, type AvailableUnit } from '@/stores/application'
 
@@ -10,46 +10,67 @@ const focusedUnit = ref<AvailableUnit | null>(applicationStore.selectedUnit)
 const isModalOpen = ref(false)
 const successMessage = ref('')
 
+// Floor filter — empty set means "show all"
+const selectedFloors = ref<Set<number>>(new Set())
+
 const canSelectUnit = computed(() => applicationStore.status === 'balloted')
 const displayUnit = computed(() => applicationStore.selectedUnit ?? focusedUnit.value)
 
+const allFloors = computed(() => {
+  const floors = [...new Set(applicationStore.availableUnits.map((u) => u.floor))].sort(
+    (a, b) => b - a,
+  )
+  return floors
+})
+
 const floorRows = computed(() => {
-  const groupedUnits = applicationStore.availableUnits.reduce<Record<number, AvailableUnit[]>>((accumulator, unit) => {
-    const floorUnits = accumulator[unit.floor] ?? []
-    floorUnits.push(unit)
-    accumulator[unit.floor] = floorUnits
-    return accumulator
-  }, {})
+  const groupedUnits = applicationStore.availableUnits.reduce<Record<number, AvailableUnit[]>>(
+    (acc, unit) => {
+      acc[unit.floor] = acc[unit.floor] ?? []
+      acc[unit.floor]!.push(unit)
+      return acc
+    },
+    {},
+  )
 
   return Object.entries(groupedUnits)
     .map(([floor, units]) => ({
       floor: Number(floor),
-      units: units.sort((firstUnit, secondUnit) => firstUnit.unitNumber.localeCompare(secondUnit.unitNumber)),
+      units: units.sort((a, b) => a.unitNumber.localeCompare(b.unitNumber)),
     }))
-    .sort((firstRow, secondRow) => secondRow.floor - firstRow.floor)
+    .sort((a, b) => b.floor - a.floor) // highest floor first
+    .filter((row) => selectedFloors.value.size === 0 || selectedFloors.value.has(row.floor))
 })
 
-const modalMessage = computed(() => {
-  if (!focusedUnit.value) {
-    return ''
+function toggleFloor(floor: number) {
+  const next = new Set(selectedFloors.value)
+  if (next.has(floor)) {
+    next.delete(floor)
+  } else {
+    next.add(floor)
   }
+  selectedFloors.value = next
+}
 
-  return `Confirm selection of Unit #${focusedUnit.value.unitNumber} at ${focusedUnit.value.development}?`
+function clearFloorFilter() {
+  selectedFloors.value = new Set()
+}
+
+const modalMessage = computed(() => {
+  if (!focusedUnit.value) return ''
+  return `Confirm booking of Unit ${focusedUnit.value.unitNumber} at ${focusedUnit.value.development}?`
 })
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('en-SG', {
     style: 'currency',
     currency: 'SGD',
-    minimumFractionDigits: 2,
+    minimumFractionDigits: 0,
   }).format(value)
 }
 
 function focusUnit(unit: AvailableUnit) {
-  if (applicationStore.status === 'selected') {
-    return
-  }
-
+  if (applicationStore.status === 'selected') return
   successMessage.value = ''
   focusedUnit.value = unit
 }
@@ -59,20 +80,14 @@ function closeConfirmModal() {
 }
 
 function confirmUnitSelection() {
-  if (!focusedUnit.value) {
-    return
-  }
-
+  if (!focusedUnit.value) return
   applicationStore.reserveUnit(focusedUnit.value)
-  successMessage.value = `Flat Selected - Unit #${focusedUnit.value.unitNumber} reserved under your name`
+  successMessage.value = `Booked — Unit ${focusedUnit.value.unitNumber} reserved under your name`
   isModalOpen.value = false
 }
 
 function openConfirmModal() {
-  if (!focusedUnit.value || !canSelectUnit.value) {
-    return
-  }
-
+  if (!focusedUnit.value || !canSelectUnit.value) return
   isModalOpen.value = true
 }
 </script>
@@ -82,7 +97,7 @@ function openConfirmModal() {
     <div class="container">
       <header class="page-header">
         <p class="eyebrow">Flat Selection</p>
-        <h1 class="page-title">Select Flat &mdash; {{ applicationStore.developmentName }}</h1>
+        <h1 class="page-title">{{ applicationStore.developmentName }}</h1>
         <p class="page-subtitle">Queue Number: {{ applicationStore.queueNumber }}</p>
       </header>
 
@@ -92,21 +107,18 @@ function openConfirmModal() {
       </div>
 
       <div v-if="applicationStore.selectedUnit" class="surface reserved-card">
-        <p class="reserved-card__label">Reserved Unit</p>
+        <p class="reserved-card__label">Booked Unit</p>
         <h2>{{ applicationStore.selectedUnit.unitNumber }}</h2>
         <p>
-          {{ applicationStore.selectedUnit.development }} is now reserved under your application. You may still review
-          the selected unit details below.
+          {{ applicationStore.selectedUnit.development }} has been reserved under your application.
         </p>
       </div>
 
       <div class="selection-layout">
         <div class="surface floor-picker">
-          <div class="floor-picker__header">
-            <div>
-              <p class="floor-picker__label">Visual Unit Picker</p>
-              <h2>Cinema-style unit selection</h2>
-            </div>
+          <!-- Header: just legend, no heading text -->
+          <div class="floor-picker__top">
+            <h2 class="floor-picker__title">Flat Booking</h2>
             <div class="floor-picker__legend">
               <span><i class="legend-dot legend-dot--available" /> Available</span>
               <span><i class="legend-dot legend-dot--focused" /> Selected</span>
@@ -114,11 +126,31 @@ function openConfirmModal() {
             </div>
           </div>
 
-          <div class="floor-picker__screen">Lift Lobby / Common Corridor</div>
+          <!-- Floor filter -->
+          <div class="floor-filter">
+            <span class="floor-filter__label">Filter floors:</span>
+            <button
+              :class="['filter-btn', { 'filter-btn--active': selectedFloors.size === 0 }]"
+              type="button"
+              @click="clearFloorFilter"
+            >
+              All
+            </button>
+            <button
+              v-for="floor in allFloors"
+              :key="floor"
+              :class="['filter-btn', { 'filter-btn--active': selectedFloors.has(floor) }]"
+              type="button"
+              @click="toggleFloor(floor)"
+            >
+              {{ floor }}F
+            </button>
+          </div>
 
+          <!-- Floor rows — highest level at top -->
           <div class="floor-rows">
             <div v-for="row in floorRows" :key="row.floor" class="floor-row">
-              <div class="floor-row__label">Floor {{ row.floor }}</div>
+              <div class="floor-row__label">Lvl {{ row.floor }}</div>
 
               <div class="floor-row__units">
                 <button
@@ -127,18 +159,27 @@ function openConfirmModal() {
                   :class="[
                     'unit-seat',
                     {
-                      'unit-seat--focused': displayUnit?.id === unit.id && applicationStore.status !== 'selected',
+                      'unit-seat--focused':
+                        displayUnit?.id === unit.id && applicationStore.status !== 'selected',
                       'unit-seat--reserved': applicationStore.selectedUnit?.id === unit.id,
                     },
                   ]"
                   type="button"
-                  :disabled="applicationStore.status === 'selected' && applicationStore.selectedUnit?.id !== unit.id"
+                  :disabled="
+                    applicationStore.status === 'selected' &&
+                    applicationStore.selectedUnit?.id !== unit.id
+                  "
                   @click="focusUnit(unit)"
                 >
                   <span class="unit-seat__number">{{ unit.unitNumber }}</span>
                 </button>
               </div>
             </div>
+          </div>
+
+          <!-- Lift lobby at bottom -->
+          <div class="lift-lobby">
+            <span>↑ Lift Lobby / Common Corridor</span>
           </div>
         </div>
 
@@ -149,7 +190,12 @@ function openConfirmModal() {
                 <p class="unit-panel__label">Selected Unit</p>
                 <h2>{{ displayUnit.unitNumber }}</h2>
               </div>
-              <span class="status-chip" :class="{ 'status-chip--success': applicationStore.selectedUnit?.id === displayUnit.id }">
+              <span
+                class="status-chip"
+                :class="{
+                  'status-chip--success': applicationStore.selectedUnit?.id === displayUnit.id,
+                }"
+              >
                 {{ applicationStore.selectedUnit?.id === displayUnit.id ? 'Reserved' : 'Available' }}
               </span>
             </div>
@@ -183,15 +229,15 @@ function openConfirmModal() {
               :disabled="!canSelectUnit || applicationStore.status === 'selected'"
               @click="openConfirmModal"
             >
-              {{ applicationStore.status === 'selected' ? 'Reserved Under Your Name' : 'Confirm This Unit' }}
+              {{ applicationStore.status === 'selected' ? 'Reserved Under Your Name' : 'Book This Unit' }}
             </button>
           </template>
 
           <template v-else>
-            <p class="unit-panel__label">Selected Unit</p>
-            <h2>Choose a box by floor</h2>
+            <p class="unit-panel__label">Unit Details</p>
+            <h2>Select a unit</h2>
             <p class="unit-panel__empty">
-              Click any unit box on the left to review its floor, facing, area, and price before confirming.
+              Click any unit on the floor plan to review its level, facing, area, and price before booking.
             </p>
           </template>
         </aside>
@@ -200,9 +246,9 @@ function openConfirmModal() {
 
     <SelectionModal
       :open="isModalOpen"
-      title="Confirm Unit Selection"
+      title="Confirm Flat Booking"
       :message="modalMessage"
-      confirm-label="Confirm Selection"
+      confirm-label="Book Unit"
       cancel-label="Cancel"
       @close="closeConfirmModal"
       @confirm="confirmUnitSelection"
@@ -251,39 +297,30 @@ function openConfirmModal() {
 
 .selection-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.9fr);
+  grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.9fr);
   gap: 22px;
   margin-top: 24px;
 }
 
 .floor-picker,
 .unit-panel {
-  padding: 24px;
+  padding: 22px;
 }
 
-.floor-picker__header,
-.unit-panel__header {
+/* Header row */
+.floor-picker__top {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 18px;
+  margin-bottom: 16px;
 }
 
-.floor-picker__label,
-.unit-panel__label {
-  margin: 0 0 8px;
-  font-size: 0.82rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: rgba(29, 29, 31, 0.56);
-}
-
-.floor-picker__header h2,
-.unit-panel h2 {
+.floor-picker__title {
   margin: 0;
-  font-size: 1.7rem;
-  line-height: 1.1;
-  letter-spacing: -0.03em;
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .floor-picker__legend {
@@ -291,19 +328,19 @@ function openConfirmModal() {
   flex-wrap: wrap;
   gap: 12px;
   color: rgba(29, 29, 31, 0.68);
-  font-size: 0.9rem;
+  font-size: 0.86rem;
 }
 
 .floor-picker__legend span {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
 }
 
 .legend-dot {
   display: inline-block;
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 999px;
 }
 
@@ -318,63 +355,93 @@ function openConfirmModal() {
 }
 
 .legend-dot--reserved {
-  background: rgba(26, 127, 75, 0.08);
+  background: rgba(26, 127, 75, 0.1);
   border: 1px solid var(--color-green);
 }
 
-.floor-picker__screen {
-  margin-top: 24px;
-  padding: 12px 16px;
-  border-radius: 999px;
-  background: var(--color-grey-bg);
-  text-align: center;
-  font-size: 0.92rem;
-  font-weight: 600;
-  color: rgba(29, 29, 31, 0.72);
+/* Floor filter */
+.floor-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--color-border);
 }
 
+.floor-filter__label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: rgba(29, 29, 31, 0.5);
+  margin-right: 2px;
+}
+
+.filter-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-white);
+  color: rgba(29, 29, 31, 0.72);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.filter-btn:hover {
+  border-color: var(--color-red);
+  color: var(--color-red);
+}
+
+.filter-btn--active {
+  border-color: var(--color-red);
+  background: var(--color-red-light);
+  color: var(--color-red);
+}
+
+/* Floor rows */
 .floor-rows {
   display: grid;
-  gap: 18px;
-  margin-top: 22px;
+  gap: 10px;
 }
 
 .floor-row {
   display: grid;
-  grid-template-columns: 110px minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 12px;
   align-items: center;
 }
 
 .floor-row__label {
-  font-size: 0.92rem;
+  font-size: 0.8rem;
   font-weight: 700;
-  color: rgba(29, 29, 31, 0.68);
+  color: rgba(29, 29, 31, 0.5);
+  text-align: right;
 }
 
 .floor-row__units {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px;
 }
 
+/* Smaller unit boxes */
 .unit-seat {
-  width: 92px;
-  min-height: 70px;
-  padding: 12px 8px;
+  width: 70px;
+  min-height: 52px;
+  padding: 8px 6px;
   border: 1px solid var(--color-border);
-  border-radius: 12px 12px 8px 8px;
+  border-radius: 8px 8px 5px 5px;
   background: var(--color-grey-bg);
   color: var(--color-charcoal);
-  transition:
-    border-color 0.2s ease,
-    background-color 0.2s ease,
-    transform 0.2s ease;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.15s ease;
 }
 
 .unit-seat:hover:not(:disabled) {
   border-color: var(--color-red);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
 }
 
 .unit-seat--focused {
@@ -388,21 +455,77 @@ function openConfirmModal() {
   color: var(--color-green);
 }
 
-.unit-seat:disabled {
-  opacity: 0.7;
+.unit-seat:disabled:not(.unit-seat--reserved):not(.unit-seat--focused) {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .unit-seat__number {
   display: block;
-  font-size: 0.9rem;
+  font-size: 0.72rem;
   font-weight: 700;
   text-align: center;
+  line-height: 1.3;
+}
+
+/* Lift lobby at bottom */
+.lift-lobby {
+  margin-top: 16px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: var(--color-grey-bg);
+  border: 1px solid var(--color-border);
+  text-align: center;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: rgba(29, 29, 31, 0.6);
+}
+
+/* Unit panel */
+.unit-panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.unit-panel__label {
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(29, 29, 31, 0.56);
+}
+
+.unit-panel h2 {
+  margin: 0;
+  font-size: 1.6rem;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: rgba(29, 29, 31, 0.06);
+  color: rgba(29, 29, 31, 0.6);
+  white-space: nowrap;
+  height: fit-content;
+}
+
+.status-chip--success {
+  background: rgba(26, 127, 75, 0.1);
+  color: var(--color-green);
 }
 
 .unit-panel__meta {
   display: grid;
   gap: 10px;
-  margin: 22px 0 24px;
+  margin: 20px 0 22px;
 }
 
 .unit-panel__meta p {
@@ -415,7 +538,8 @@ function openConfirmModal() {
 
 .unit-panel__empty {
   margin: 12px 0 0;
-  color: rgba(29, 29, 31, 0.72);
+  color: rgba(29, 29, 31, 0.65);
+  line-height: 1.6;
 }
 
 @media (max-width: 960px) {
@@ -424,13 +548,12 @@ function openConfirmModal() {
   }
 
   .floor-row {
-    grid-template-columns: 1fr;
-    gap: 10px;
+    grid-template-columns: 48px 1fr;
   }
 
-  .floor-picker__header,
-  .unit-panel__header {
+  .floor-picker__top {
     flex-direction: column;
+    align-items: flex-start;
   }
 }
 </style>

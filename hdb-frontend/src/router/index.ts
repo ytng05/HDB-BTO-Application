@@ -2,10 +2,11 @@ import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '@/views/HomeView.vue'
 import ApplyLayout from '@/views/ApplyLayout.vue'
 import FlatSelectionView from '@/views/FlatSelectionView.vue'
-import PaymentConfirmationView from '@/views/PaymentConfirmationView.vue'
 import ApplyDetailsView from '@/views/apply/ApplyDetailsView.vue'
 import ApplyDocumentsView from '@/views/apply/ApplyDocumentsView.vue'
 import ApplyPaymentView from '@/views/apply/ApplyPaymentView.vue'
+import ApplyReviewView from '@/views/apply/ApplyReviewView.vue'
+import PaymentResultView from '@/views/PaymentResultView.vue'
 import { useAuth } from '@/stores/auth'
 import { useApplicationStore } from '@/stores/application'
 import { pinia } from '@/stores/pinia'
@@ -72,7 +73,20 @@ const router = createRouter({
             requiresAuth: true,
           },
         },
+        {
+          path: 'review',
+          name: 'apply-review',
+          component: ApplyReviewView,
+          meta: {
+            requiresAuth: true,
+          },
+        },
       ],
+    },
+    {
+      path: '/payment-result',
+      name: 'payment-result',
+      component: PaymentResultView,
     },
     {
       path: '/select-flat',
@@ -86,14 +100,6 @@ const router = createRouter({
     {
       path: '/flat-selection',
       redirect: '/select-flat',
-    },
-    {
-      path: '/payment-confirmation',
-      name: 'payment-confirmation',
-      component: PaymentConfirmationView,
-      meta: {
-        requiresAuth: true,
-      },
     },
   ],
 })

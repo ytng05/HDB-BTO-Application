@@ -50,8 +50,8 @@ const dashboardText = computed(() => {
 })
 
 function startApplicationFlow() {
-  if (applicationStore.status === 'processing') {
-    router.push('/apply/payment')
+  if (applicationStore.hasSubmitted) {
+    router.push('/apply/review')
     return
   }
 

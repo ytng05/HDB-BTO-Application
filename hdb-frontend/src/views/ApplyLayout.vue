@@ -6,7 +6,15 @@ import ApplicationProgress from '@/components/ApplicationProgress.vue'
 const route = useRoute()
 
 const steps = ['Details', 'Documents', 'Payment']
-const activeIndex = computed(() => Number(route.meta.applyStepIndex ?? 0))
+const activeIndex = computed(() =>
+  typeof route.meta.applyStepIndex === 'number' ? Number(route.meta.applyStepIndex) : -1,
+)
+const showProgress = computed(() => activeIndex.value >= 0)
+const pageSubtitle = computed(() =>
+  route.name === 'apply-review'
+    ? 'Review the information tied to your application.'
+    : 'Complete your application in three guided steps.',
+)
 </script>
 
 <template>
@@ -15,10 +23,10 @@ const activeIndex = computed(() => Number(route.meta.applyStepIndex ?? 0))
       <header class="apply-header">
         <p class="eyebrow">Flat Application</p>
         <h1 class="page-title">Apply for Flat</h1>
-        <p class="page-subtitle">Complete your application in three guided steps.</p>
+        <p class="page-subtitle">{{ pageSubtitle }}</p>
       </header>
 
-      <ApplicationProgress :steps="steps" :active-index="activeIndex" />
+      <ApplicationProgress v-if="showProgress" :steps="steps" :active-index="activeIndex" />
 
       <div class="apply-content">
         <RouterView />
