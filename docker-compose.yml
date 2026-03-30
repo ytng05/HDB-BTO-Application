@@ -1,11 +1,32 @@
 services:
-  ocr-service:
+  document-db:
+    image: mysql:8.0
+    container_name: document_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: documents
+    ports:
+      - "3312:3306"
+    volumes:
+      - document_db_data:/var/lib/mysql
+      - ./document/documents.sql:/docker-entrypoint-initdb.d/documents.sql:ro
+    restart: always
+
+  document-service:
     build:
       context: ./document
-      dockerfile: Dockerfile.ocr
-    container_name: ocr_service
+      dockerfile: Dockerfile
+    container_name: document_service
     ports:
       - "5050:5050"
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://root:root@document-db:3306/documents
+      OCR_DATA_DIR: /data
+      OCR_STORAGE_DIR: /data/documents
+    volumes:
+      - ./document/data:/data
+    depends_on:
+      - document-db
     restart: always
 
   nets-payment-service:
@@ -28,3 +49,6 @@ services:
       NETS_MERCHANT_TIMEZONE: ${NETS_MERCHANT_TIMEZONE:-+8:00}
       HDB_PORTAL_URL: ${HDB_PORTAL_URL:-http://localhost:5173}
     restart: always
+
+volumes:
+  document_db_data:

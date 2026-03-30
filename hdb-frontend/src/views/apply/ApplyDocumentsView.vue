@@ -11,7 +11,7 @@ const OCR_SERVICE_URL = import.meta.env.VITE_OCR_URL ?? 'http://localhost:5050'
 
 interface OcrResult {
   status: 'idle' | 'loading' | 'success' | 'error'
-  docType?: string
+  documentType?: string
   fields?: Record<string, unknown>
   error?: string
 }
@@ -19,11 +19,10 @@ interface OcrResult {
 const incomeOcr = ref<OcrResult>({ status: 'idle' })
 const hfeOcr = ref<OcrResult>({ status: 'idle' })
 
-async function runOcr(file: File, target: typeof incomeOcr, docKind: 'income' | 'hfe') {
+async function runOcr(file: File, target: typeof incomeOcr) {
   target.value = { status: 'loading' }
   const formData = new FormData()
   formData.append('file', file)
-  formData.append('doc_kind', docKind)
   try {
     const res = await fetch(`${OCR_SERVICE_URL}/extract`, { method: 'POST', body: formData })
     const data = await res.json()
@@ -31,7 +30,7 @@ async function runOcr(file: File, target: typeof incomeOcr, docKind: 'income' | 
       target.value = { status: 'error', error: data.error ?? `HTTP ${res.status}` }
       return
     }
-    target.value = { status: 'success', docType: data.doc_type, fields: data.fields }
+    target.value = { status: 'success', documentType: data.document_type, fields: data.fields }
   } catch (err) {
     target.value = {
       status: 'error',
@@ -46,9 +45,9 @@ function handleFileChange(event: Event, documentKey: 'incomePdfName' | 'hfeLette
   if (!file) return
   applicationStore.setDocument(documentKey, file.name)
   if (documentKey === 'incomePdfName') {
-    runOcr(file, incomeOcr, 'income')
+    runOcr(file, incomeOcr)
   } else {
-    runOcr(file, hfeOcr, 'hfe')
+    runOcr(file, hfeOcr)
   }
 }
 
@@ -57,16 +56,16 @@ function fmtKey(key: string): string {
 }
 
 function fmtValue(value: unknown): string {
-  if (value === null || value === undefined || value === '') return '—'
+  if (value === null || value === undefined || value === '') return '-'
   if (Array.isArray(value)) {
-    if (value.length === 0) return '—'
+    if (value.length === 0) return '-'
     return value
       .map((item) =>
         typeof item === 'object' && item !== null
           ? Object.entries(item as Record<string, unknown>)
               .filter(([, v]) => v !== null && v !== undefined && v !== '')
               .map(([k, v]) => `${fmtKey(k)}: ${v}`)
-              .join('  ·  ')
+              .join(' | ')
           : String(item),
       )
       .join('\n')
@@ -89,7 +88,7 @@ function visibleFields(fields: Record<string, unknown>): [string, unknown][] {
     </div>
 
     <div class="upload-grid">
-      <!-- ── Income PDF ───────────────────────────────────────── -->
+      <!-- Income PDF -->
       <div class="upload-card">
         <div class="upload-card__header">
           <FileText :size="18" />
@@ -111,7 +110,7 @@ function visibleFields(fields: Record<string, unknown>): [string, unknown][] {
         <!-- OCR result -->
         <div v-if="incomeOcr.status === 'loading'" class="ocr-panel ocr-panel--loading">
           <span class="ocr-spinner" />
-          <span>Scanning document…</span>
+          <span>Scanning document...</span>
         </div>
 
         <div v-else-if="incomeOcr.status === 'error'" class="ocr-panel ocr-panel--error">
@@ -120,7 +119,7 @@ function visibleFields(fields: Record<string, unknown>): [string, unknown][] {
 
         <div v-else-if="incomeOcr.status === 'success' && incomeOcr.fields" class="ocr-panel ocr-panel--success">
           <div class="ocr-panel__header">
-            <span class="ocr-badge">OCR · {{ incomeOcr.docType }}</span>
+            <span class="ocr-badge">OCR | {{ incomeOcr.documentType }}</span>
             <span class="ocr-badge-label">Extracted fields</span>
           </div>
           <template v-for="[key, val] in visibleFields(incomeOcr.fields)" :key="key">
@@ -143,7 +142,7 @@ function visibleFields(fields: Record<string, unknown>): [string, unknown][] {
         </div>
       </div>
 
-      <!-- ── HFE Letter PDF ──────────────────────────────────── -->
+      <!-- HFE Letter PDF -->
       <div class="upload-card">
         <div class="upload-card__header">
           <FileText :size="18" />
@@ -165,7 +164,7 @@ function visibleFields(fields: Record<string, unknown>): [string, unknown][] {
         <!-- OCR result -->
         <div v-if="hfeOcr.status === 'loading'" class="ocr-panel ocr-panel--loading">
           <span class="ocr-spinner" />
-          <span>Scanning document…</span>
+          <span>Scanning document...</span>
         </div>
 
         <div v-else-if="hfeOcr.status === 'error'" class="ocr-panel ocr-panel--error">
@@ -174,7 +173,7 @@ function visibleFields(fields: Record<string, unknown>): [string, unknown][] {
 
         <div v-else-if="hfeOcr.status === 'success' && hfeOcr.fields" class="ocr-panel ocr-panel--success">
           <div class="ocr-panel__header">
-            <span class="ocr-badge">OCR · {{ hfeOcr.docType }}</span>
+            <span class="ocr-badge">OCR | {{ hfeOcr.documentType }}</span>
             <span class="ocr-badge-label">Extracted fields</span>
           </div>
           <template v-for="[key, val] in visibleFields(hfeOcr.fields)" :key="key">
@@ -269,7 +268,7 @@ function visibleFields(fields: Record<string, unknown>): [string, unknown][] {
   color: var(--color-red);
 }
 
-/* ── OCR result panel ─────────────────────────────────────────── */
+/* OCR result panel */
 .ocr-panel {
   border-radius: 8px;
   padding: 12px 14px;

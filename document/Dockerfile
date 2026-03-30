@@ -1,6 +1,5 @@
 FROM python:3.11-slim
 
-# Install Tesseract and Poppler (required by pdf2image to render PDF pages)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-eng \
@@ -9,11 +8,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.ocr.txt .
-RUN pip install --no-cache-dir -r requirements.ocr.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY ocr.py .
+COPY documents.py .
+COPY documents.sql .
 
 EXPOSE 5050
 
-CMD ["python", "ocr.py"]
+CMD ["python", "documents.py"]

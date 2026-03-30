@@ -9,7 +9,7 @@ A microservices-based HDB BTO flat application portal built with Vue 3, Flask, a
 | Service | Port | Description |
 |---|---|---|
 | `hdb-frontend` | 5173 | Vue 3 frontend (Vite) |
-| `ocr-service` | 5050 | PDF OCR for income statements and HFE letters |
+| `document-service` | 5050 | Document OCR for income statements and HFE letters |
 | `nets-payment-service` | 5003 | NETS eNETS B2S payment wrapper |
 
 ---
@@ -52,8 +52,16 @@ docker compose up --build
 ```
 
 This starts:
-- OCR service on `http://localhost:5050`
+- Document DB on port `3312`
+- Document service on `http://localhost:5050`
 - NETS payment service on `http://localhost:5003`
+
+The document service persists data under the bind-mounted folder `./document/data`:
+- raw uploaded PDFs in `./document/data/documents/`
+- document metadata and OCR fields in the MySQL `documents` database
+
+The document schema and seed data live in `document/documents.sql`, following the same
+schema-plus-sample-records pattern used by the ballot-audit service.
 
 To run in the background:
 
@@ -70,7 +78,6 @@ docker compose down
 Health checks:
 
 ```bash
-curl http://localhost:5050/health
 curl http://localhost:5003/payment/records
 ```
 
@@ -98,14 +105,13 @@ Click **Login** in the navbar and enter an NRIC. Demo accounts:
 |---|---|
 | `S1234567A` | Aaron Tan |
 | `S7654321D` | Demo User |
-| `S9812379B` | LIM YONG XIANG |
 
 ### Apply for a Flat
 
 After logging in, click **Start Application** from the dashboard. The flow has three steps:
 
 1. **Details** - Fill in personal details and flat preferences
-2. **Documents** - Upload your CPF Income Statement PDF and HFE Letter PDF. The OCR service extracts and displays the fields inline for verification.
+2. **Documents** - Upload your CPF Income Statement PDF and HFE Letter PDF. The document service extracts and displays the fields inline for verification.
 3. **Payment** - Pay the $10 application fee via NETS. Clicking **Pay with NETS** redirects the current tab to the eNETS payment page.
 
 ### BTO Launches
@@ -114,19 +120,28 @@ Browse available BTO projects from the **BTO Launches** section on the home page
 
 ---
 
-## 5. OCR Document Testing
+## 5. Document Service Testing
 
-The Documents step calls the OCR service on upload and displays extracted fields inline. To test directly with curl:
+The Documents step calls the document service on upload and displays extracted fields inline. To test directly with curl:
 
 ```bash
 # CPF Income Statement
-curl -F "file=@income_doc_1_aaron_tan.pdf" http://localhost:5050/extract
+curl -F "file=@income_doc_1_aaron_tan.pdf" -F "application_id=1001" http://localhost:5050/extract
 
 # HFE Letter
-curl -F "file=@hfe_1_aaron_tan.pdf" http://localhost:5050/extract
+curl -F "file=@hfe_1_aaron_tan.pdf" -F "application_id=1001" http://localhost:5050/extract
 
-# Raw OCR text (debug)
-curl -F "file=@your_doc.pdf" http://localhost:5050/debug
+# List persisted documents
+curl http://localhost:5050/documents
+
+# List documents for one application
+curl "http://localhost:5050/documents?application_id=1001"
+
+# Read one stored record
+curl http://localhost:5050/documents/<document_id>
+
+# Save the stored PDF locally
+curl -L "http://localhost:5050/documents/<document_id>/file" -o saved.pdf
 ```
 
 ---
@@ -157,9 +172,11 @@ esd-hdb/
 |-- docker-compose.yml
 |-- .env
 |-- document/
-|   |-- ocr.py
-|   |-- Dockerfile.ocr
-|   `-- requirements.ocr.txt
+|   |-- documents.py
+|   |-- documents.sql
+|   |-- Dockerfile
+|   |-- requirements.txt
+|   `-- data/
 |-- nets_payment/
 |   |-- nets_payment.py
 |   |-- Dockerfile.txt

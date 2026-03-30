@@ -27,6 +27,8 @@ env/
 # SQLite and local DB artifacts
 *.sqlite
 *.sqlite3
+document/data/*
+!document/data/.gitkeep
 
 # --- Node / Vite frontend (hdb-frontend/) ---
 hdb-frontend/node_modules/
