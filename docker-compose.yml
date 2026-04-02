@@ -29,6 +29,84 @@ services:
       - document-db
     restart: always
 
+  application-db:
+    image: mysql:8.0
+    container_name: application_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: applications
+    ports:
+      - "3313:3306"
+    volumes:
+      - application_db_data:/var/lib/mysql
+      - ./application/applications.sql:/docker-entrypoint-initdb.d/applications.sql:ro
+    restart: always
+
+  application-service:
+    build:
+      context: ./application
+      dockerfile: Dockerfile
+    container_name: application_service
+    ports:
+      - "5004:5004"
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://root:root@application-db:3306/applications
+    depends_on:
+      - application-db
+    restart: always
+
+  singpass-service:
+    build:
+      context: ./singpass
+      dockerfile: Dockerfile
+    container_name: singpass_service
+    ports:
+      - "5007:5007"
+    environment:
+      SINGPASS_DATA_PATH: /app/v3.json
+    restart: always
+
+  hfe-application-db:
+    image: mysql:8.0
+    container_name: hfe_application_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: hfe_applications
+    ports:
+      - "3314:3306"
+    volumes:
+      - hfe_application_db_data:/var/lib/mysql
+      - ./hfe_application/hfe_application.sql:/docker-entrypoint-initdb.d/hfe_application.sql:ro
+    restart: always
+
+  hfe-application-service:
+    build:
+      context: ./hfe_application
+      dockerfile: Dockerfile
+    container_name: hfe_application_service
+    ports:
+      - "5009:5009"
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://root:root@hfe-application-db:3306/hfe_applications
+    depends_on:
+      - hfe-application-db
+    restart: always
+
+  check-eligibility-service:
+    build:
+      context: ./check_eligibility
+      dockerfile: Dockerfile
+    container_name: check_eligibility_service
+    ports:
+      - "5008:5008"
+    environment:
+      SINGPASS_SERVICE_URL: http://singpass-service:5007
+      HFE_APPLICATION_SERVICE_URL: http://hfe-application-service:5009
+    depends_on:
+      - singpass-service
+      - hfe-application-service
+    restart: always
+
   nets-payment-service:
     build:
       context: ./nets_payment
@@ -52,3 +130,5 @@ services:
 
 volumes:
   document_db_data:
+  application_db_data:
+  hfe_application_db_data:

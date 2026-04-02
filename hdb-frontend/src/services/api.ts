@@ -1,6 +1,10 @@
 import axios from 'axios'
 
 export const APPLICANT_URL = 'http://localhost:5001'
+export const APPLICATION_URL = import.meta.env.VITE_APPLICATION_URL ?? 'http://localhost:5004'
+export const DOCUMENT_URL = import.meta.env.VITE_OCR_URL ?? 'http://localhost:5050'
+export const CHECK_ELIGIBILITY_URL =
+  import.meta.env.VITE_CHECK_ELIGIBILITY_URL ?? 'http://localhost:5008'
 export const FLAT_SELECTION_URL = 'http://localhost:5002'
 export const NETS_PAYMENT_URL = import.meta.env.VITE_NETS_URL ?? 'http://localhost:5003'
 export const FLAT_ALLOCATION_URL = 'http://localhost:5005'
@@ -12,6 +16,8 @@ export interface ApiEnvelope<T> {
   code: number
   data?: T
   message?: ApiMessage
+  error?: string
+  details?: string[]
 }
 
 export interface ApplicantLoginBody {
@@ -26,6 +32,103 @@ export interface ApplicantLoginData {
 }
 
 export type ApplicantLoginResponse = ApiEnvelope<ApplicantLoginData> | ApplicantLoginData
+
+export type ServiceApplicationStatus =
+  | 'DRAFT'
+  | 'SUBMITTED'
+  | 'SUCCESSFUL'
+  | 'UNSUCCESSFUL'
+  | 'CANCELLED'
+
+export interface ApplicationMemberRecord {
+  member_id: number
+  application_id: number
+  member_role: 'MAIN_APPLICANT' | 'CO_APPLICANT' | 'OCCUPANT'
+  nric_fin: string
+  full_name: string
+  relationship_to_main: string
+  date_of_birth: string | null
+  citizenship_status: string
+  marital_status: string | null
+  is_pregnant: boolean
+  income_amount: number | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface ApplicationRecord {
+  application_id: number
+  exercise_id: number
+  project_id: number
+  flat_type: string
+  main_applicant_nric: string
+  income_document_id: number | null
+  hfe_document_id: number | null
+  draft_payload: Record<string, unknown> | null
+  application_status: ServiceApplicationStatus
+  submitted_at: string | null
+  created_at: string | null
+  updated_at: string | null
+  members: ApplicationMemberRecord[]
+}
+
+export interface ApplicationsByNricResponse {
+  nric: string
+  applications: ApplicationRecord[]
+}
+
+export interface ApplicationDraftRequest {
+  main_applicant_nric: string
+  exercise_id?: number
+  project_id?: number
+  flat_type?: string
+  income_document_id?: number | null
+  hfe_document_id?: number | null
+  draft_payload?: Record<string, unknown>
+}
+
+export interface UploadedDocumentRecord {
+  document_id: number
+  application_id: number
+  document_type: 'income' | 'hfe' | 'unknown'
+  status: string
+  fields: Record<string, unknown> | null
+}
+
+export interface EligibilityApplicationPayload {
+  application_id?: number
+  exercise_id?: number
+  project_id?: number
+  main_applicant_nric: string
+  full_name: string
+  date_of_birth: string
+  contact_number?: string
+  email?: string
+  marital_status: string
+  preferred_town?: string
+  flat_type: string
+}
+
+export interface EligibilityIncomeDocumentPayload {
+  document_id?: number
+  document_type: 'income' | 'hfe' | 'unknown'
+  fields: Record<string, unknown>
+}
+
+export interface EligibilityCheckRequest {
+  application: EligibilityApplicationPayload
+  income_document: EligibilityIncomeDocumentPayload
+}
+
+export interface EligibilityCheckResult {
+  application_id?: number | null
+  eligible: boolean
+  summary: string
+  blocking_reasons: string[]
+  field_checks: Array<Record<string, unknown>>
+  logic_checks: Array<Record<string, unknown>>
+  compared_values: Record<string, unknown>
+}
 
 export interface FlatSelectionRecord {
   selection_id: number
@@ -110,6 +213,21 @@ const applicantApi = axios.create({
   timeout: 10000,
 })
 
+const applicationApi = axios.create({
+  baseURL: APPLICATION_URL,
+  timeout: 10000,
+})
+
+const documentApi = axios.create({
+  baseURL: DOCUMENT_URL,
+  timeout: 30000,
+})
+
+const checkEligibilityApi = axios.create({
+  baseURL: CHECK_ELIGIBILITY_URL,
+  timeout: 20000,
+})
+
 const flatSelectionApi = axios.create({
   baseURL: FLAT_SELECTION_URL,
   timeout: 10000,
@@ -158,13 +276,29 @@ function normaliseMessage(message: ApiMessage | undefined, fallback: string): st
   return fallback
 }
 
+function normaliseErrorPayload(payload: Partial<ApiEnvelope<unknown>> | undefined, fallback: string): string {
+  if (!payload) {
+    return fallback
+  }
+
+  if (typeof payload.error === 'string' && payload.error.trim().length > 0) {
+    return payload.error
+  }
+
+  if (Array.isArray(payload.details) && payload.details.length > 0) {
+    return payload.details.join(' ')
+  }
+
+  return normaliseMessage(payload.message, fallback)
+}
+
 export function getStatusCode(error: unknown): number | undefined {
   return axios.isAxiosError(error) ? error.response?.status : undefined
 }
 
 export function getErrorMessage(error: unknown, fallback = 'Unable to complete your request.'): string {
   if (axios.isAxiosError<ApiEnvelope<unknown>>(error)) {
-    return normaliseMessage(error.response?.data?.message, fallback)
+    return normaliseErrorPayload(error.response?.data, fallback)
   }
 
   if (error instanceof Error && error.message.trim().length > 0) {
@@ -177,6 +311,58 @@ export function getErrorMessage(error: unknown, fallback = 'Unable to complete y
 export async function loginApplicant(payload: ApplicantLoginBody): Promise<ApplicantLoginData> {
   const response = await applicantApi.post<ApplicantLoginResponse>('/applicant/login', payload)
   return unwrapApiData(response.data)
+}
+
+export async function getApplicationsByNric(nric: string): Promise<ApplicationsByNricResponse> {
+  const response = await applicationApi.get<ApplicationsByNricResponse>('/applications', {
+    params: {
+      nric,
+    },
+  })
+  return response.data
+}
+
+export async function createApplicationDraft(payload: ApplicationDraftRequest): Promise<ApplicationRecord> {
+  const response = await applicationApi.post<ApplicationRecord>('/applications/drafts', payload)
+  return response.data
+}
+
+export async function updateApplicationDraft(
+  applicationId: number,
+  payload: ApplicationDraftRequest,
+): Promise<ApplicationRecord> {
+  const response = await applicationApi.put<ApplicationRecord>(`/applications/${applicationId}/draft`, payload)
+  return response.data
+}
+
+export async function updateApplicationStatus(
+  applicationId: number,
+  status: string,
+): Promise<ApplicationRecord> {
+  const response = await applicationApi.put<ApplicationRecord>(`/applications/${applicationId}/status`, {
+    status,
+  })
+  return response.data
+}
+
+export async function uploadDocument(file: File, applicationId: number): Promise<UploadedDocumentRecord> {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('application_id', String(applicationId))
+
+  const response = await documentApi.post<UploadedDocumentRecord>('/extract', formData)
+  return response.data
+}
+
+export async function getDocument(documentId: number): Promise<UploadedDocumentRecord> {
+  const response = await documentApi.get<UploadedDocumentRecord>(`/documents/${documentId}`)
+  return response.data
+}
+
+export async function checkEligibility(payload: EligibilityCheckRequest): Promise<EligibilityCheckResult> {
+  const response = await checkEligibilityApi.post<EligibilityCheckResult>('/check-eligibility', payload)
+
+  return response.data
 }
 
 export async function getSelection(applicantId: number): Promise<FlatSelectionRecord> {

@@ -92,8 +92,25 @@ function handlePageShow() {
 }
 
 async function confirmPayment() {
+  if (applicationStore.isCurrentSubmitted) {
+    paymentError.value = 'This application has already been submitted. You can review or update it instead.'
+    paymentStep.value = 'error'
+    return
+  }
+
   paymentStep.value = 'initiating'
   paymentError.value = ''
+
+  if (!applicationStore.lastEligibilityResult) {
+    const preparation = await applicationStore.prepareSubmission()
+    if (!preparation) {
+      paymentError.value = applicationStore.draftSaveError || 'Please complete your application before paying.'
+      paymentStep.value = 'error'
+      return
+    }
+
+    console.log('Eligibility result:', preparation.eligibility)
+  }
 
   try {
     const res = await fetch(`${NETS_SERVICE_URL}/payment/initiate`, {
@@ -102,7 +119,7 @@ async function confirmPayment() {
       body: JSON.stringify({
         applicant_id: String(applicationStore.form.nric),
         amount: APPLICATION_FEE,
-        description: `BTO Application Fee – ${applicantName.value ?? applicationStore.form.nric}`,
+        description: `BTO Application Fee - ${applicantName.value ?? applicationStore.form.nric}`,
       }),
     })
 
@@ -146,6 +163,11 @@ async function confirmPayment() {
 }
 
 onMounted(() => {
+  if (applicationStore.isCurrentSubmitted) {
+    void router.replace('/apply/review')
+    return
+  }
+
   void recoverReturnedPayment()
 
   if (typeof window !== 'undefined') {
@@ -163,8 +185,8 @@ onBeforeUnmount(() => {
 <template>
   <div class="surface step-card">
     <div class="step-card__copy">
-      <h2>Step 3 &mdash; Payment</h2>
-      <p>Pay the application processing fee via NETS to submit your flat application.</p>
+      <h2>Step 3 - Payment</h2>
+      <p>Eligibility is checked before you enter this step. Confirm here to continue to NETS and pay the application fee.</p>
     </div>
 
     <div class="summary-grid">
@@ -178,11 +200,11 @@ onBeforeUnmount(() => {
       </div>
       <div class="summary-row">
         <span class="summary-label">Preferred Town</span>
-        <span class="summary-value">{{ applicationStore.form.preferredTown || '—' }}</span>
+        <span class="summary-value">{{ applicationStore.form.preferredTown || '-' }}</span>
       </div>
       <div class="summary-row">
         <span class="summary-label">Flat Type</span>
-        <span class="summary-value">{{ applicationStore.form.flatType || '—' }}</span>
+        <span class="summary-value">{{ applicationStore.form.flatType || '-' }}</span>
       </div>
       <div class="summary-row summary-row--total">
         <span class="summary-label">Application Fee</span>
@@ -206,19 +228,19 @@ onBeforeUnmount(() => {
 
       <div v-if="paymentStep === 'idle'" class="nets-status">
         <ShieldCheck :size="17" />
-        <span>Tap <strong>Pay with NETS</strong> — you'll be redirected to the eNETS secure payment page</span>
+        <span>Click <strong>Submit &amp; Pay with NETS</strong> to continue to the secure payment page.</span>
       </div>
       <div v-else-if="paymentStep === 'initiating'" class="nets-status nets-status--processing">
         <span class="nets-spinner" />
-        <span>Contacting payment service…</span>
+        <span>Preparing your application and checking eligibility...</span>
       </div>
       <div v-else-if="paymentStep === 'redirecting'" class="nets-status nets-status--processing">
         <span class="nets-spinner" />
-        <span>Redirecting to the eNETS gateway…</span>
+        <span>Redirecting to the eNETS gateway...</span>
       </div>
       <div v-else-if="paymentStep === 'checking'" class="nets-status nets-status--processing">
         <span class="nets-spinner" />
-        <span>Checking your unfinished NETS payment…</span>
+        <span>Checking your unfinished NETS payment...</span>
       </div>
       <div v-else-if="paymentStep === 'error'" class="nets-status nets-status--error">
         <AlertCircle :size="17" />
@@ -230,7 +252,12 @@ onBeforeUnmount(() => {
       <button
         class="btn btn-secondary"
         type="button"
-        :disabled="paymentStep === 'initiating' || paymentStep === 'redirecting' || paymentStep === 'checking'"
+        :disabled="
+          paymentStep === 'initiating' ||
+          paymentStep === 'redirecting' ||
+          paymentStep === 'checking' ||
+          applicationStore.isPreparingSubmission
+        "
         @click="router.push('/apply/documents')"
       >
         Back
@@ -238,11 +265,16 @@ onBeforeUnmount(() => {
       <button
         class="btn btn-primary nets-pay-btn"
         type="button"
-        :disabled="paymentStep === 'initiating' || paymentStep === 'redirecting' || paymentStep === 'checking'"
+        :disabled="
+          paymentStep === 'initiating' ||
+          paymentStep === 'redirecting' ||
+          paymentStep === 'checking' ||
+          applicationStore.isPreparingSubmission
+        "
         @click="confirmPayment"
       >
         <CreditCard :size="17" />
-        <span>Pay with NETS</span>
+        <span>Submit &amp; Pay with NETS</span>
       </button>
     </div>
   </div>
@@ -283,12 +315,29 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--color-border);
 }
 
-.summary-row:last-child { border-bottom: none; }
-.summary-row--total { background: rgba(29, 29, 31, 0.02); }
+.summary-row:last-child {
+  border-bottom: none;
+}
 
-.summary-label { font-size: 0.88rem; color: rgba(29, 29, 31, 0.6); }
-.summary-value { font-size: 0.94rem; font-weight: 600; color: var(--color-charcoal); }
-.summary-value--amount { font-size: 1.05rem; color: var(--color-charcoal); }
+.summary-row--total {
+  background: rgba(29, 29, 31, 0.02);
+}
+
+.summary-label {
+  font-size: 0.88rem;
+  color: rgba(29, 29, 31, 0.6);
+}
+
+.summary-value {
+  font-size: 0.94rem;
+  font-weight: 600;
+  color: var(--color-charcoal);
+}
+
+.summary-value--amount {
+  font-size: 1.05rem;
+  color: var(--color-charcoal);
+}
 
 .nets-terminal {
   padding: 26px;
@@ -317,11 +366,29 @@ onBeforeUnmount(() => {
   letter-spacing: 0.1em;
 }
 
-.nets-env-badge { font-size: 0.76rem; color: rgba(255, 255, 255, 0.45); }
+.nets-env-badge {
+  font-size: 0.76rem;
+  color: rgba(255, 255, 255, 0.45);
+}
 
-.nets-amount { display: flex; align-items: baseline; gap: 7px; }
-.nets-amount__currency { font-size: 1rem; font-weight: 600; color: rgba(255, 255, 255, 0.6); }
-.nets-amount__value { font-size: 2.8rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1; }
+.nets-amount {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.nets-amount__currency {
+  font-size: 1rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.nets-amount__value {
+  font-size: 2.8rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
 
 .nets-status {
   display: inline-flex;
@@ -335,8 +402,14 @@ onBeforeUnmount(() => {
   line-height: 1.45;
 }
 
-.nets-status--processing { color: rgba(255, 255, 255, 0.85); }
-.nets-status--error { background: rgba(220, 38, 38, 0.15); color: #fca5a5; }
+.nets-status--processing {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.nets-status--error {
+  background: rgba(220, 38, 38, 0.15);
+  color: #fca5a5;
+}
 
 .nets-spinner {
   width: 16px;
@@ -348,7 +421,11 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 .step-actions {
   display: flex;
@@ -357,9 +434,15 @@ onBeforeUnmount(() => {
   margin-top: 26px;
 }
 
-.nets-pay-btn { display: inline-flex; align-items: center; gap: 8px; }
+.nets-pay-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
 
 @media (max-width: 640px) {
-  .step-actions { flex-direction: column-reverse; }
+  .step-actions {
+    flex-direction: column-reverse;
+  }
 }
 </style>

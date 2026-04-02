@@ -5,6 +5,7 @@ const STORAGE_KEY = 'hdb-flat-portal-auth'
 interface StoredAuthSession {
   applicant_id: number
   name: string
+  nric: string | null
 }
 
 const applicantId = ref<number | null>(null)
@@ -26,21 +27,25 @@ function restoreSession() {
     const parsedSession = JSON.parse(rawSession) as Partial<StoredAuthSession>
     applicantId.value = typeof parsedSession.applicant_id === 'number' ? parsedSession.applicant_id : null
     applicantName.value = typeof parsedSession.name === 'string' ? parsedSession.name : null
+    applicantNric.value = typeof parsedSession.nric === 'string' ? parsedSession.nric : null
   } catch {
     window.localStorage.removeItem(STORAGE_KEY)
     applicantId.value = null
     applicantName.value = null
+    applicantNric.value = null
   }
 }
 
-function login(id: number, name: string) {
+function login(id: number, name: string, nric: string | null = null) {
   applicantId.value = id
   applicantName.value = name
+  applicantNric.value = nric ? nric.trim().toUpperCase() : null
 
   if (typeof window !== 'undefined') {
     const session: StoredAuthSession = {
       applicant_id: id,
       name,
+      nric: applicantNric.value,
     }
 
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session))
@@ -67,7 +72,7 @@ export function useAuth(): {
   applicantName: Ref<string | null>
   applicantNric: Ref<string | null>
   isLoggedIn: ComputedRef<boolean>
-  login: (id: number, name: string) => void
+  login: (id: number, name: string, nric?: string | null) => void
   logout: () => void
   restoreSession: () => void
   setSessionNric: (nric: string | null) => void

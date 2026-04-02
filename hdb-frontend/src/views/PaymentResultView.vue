@@ -65,7 +65,8 @@ async function verifyPayment() {
       clearStoredPaymentRef()
 
       if (callbackStatus.value === 'success' && !applicationStore.hasSubmitted) {
-        applicationStore.submitApplication()
+        await applicationStore.submitApplication()
+        await applicationStore.loadLinkedApplications(applicationStore.form.nric)
       }
     } else {
       statusMessage.value = 'Missing transaction reference. Unable to verify this payment.'
@@ -83,7 +84,8 @@ async function verifyPayment() {
     statusMessage.value = payment.message || 'Payment status checked with NETS.'
 
     if (payment.status === 'success' && !applicationStore.hasSubmitted) {
-      applicationStore.submitApplication()
+      await applicationStore.submitApplication()
+      await applicationStore.loadLinkedApplications(applicationStore.form.nric)
     }
 
     if (payment.status === 'success' || payment.status === 'failed' || payment.status === 'cancelled') {

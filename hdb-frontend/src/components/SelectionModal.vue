@@ -7,12 +7,14 @@ const props = withDefaults(
     open: boolean
     title: string
     message: string
+    eyebrow?: string
     processing?: boolean
     confirmLabel?: string
     cancelLabel?: string
     processingLabel?: string
   }>(),
   {
+    eyebrow: 'Please Confirm',
     processing: false,
     confirmLabel: 'Confirm',
     cancelLabel: 'Cancel',
@@ -69,7 +71,7 @@ onBeforeUnmount(() => {
       <div v-if="open" class="modal-overlay" @click.self="!processing && emit('close')">
         <div class="surface modal-panel" role="dialog" aria-modal="true" aria-labelledby="selection-modal-title">
           <div class="modal-copy">
-            <p class="eyebrow">Selection Review</p>
+            <p class="eyebrow">{{ eyebrow }}</p>
             <h2 id="selection-modal-title">{{ title }}</h2>
             <p class="modal-description">{{ message }}</p>
           </div>

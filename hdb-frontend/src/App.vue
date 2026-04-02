@@ -3,11 +3,17 @@ import { onMounted } from 'vue'
 import { RouterView } from 'vue-router'
 import NavBar from '@/components/NavBar.vue'
 import { useAuth } from '@/stores/auth'
+import { useApplicationStore } from '@/stores/application'
 
-const { restoreSession } = useAuth()
+const { applicantNric, restoreSession } = useAuth()
+const applicationStore = useApplicationStore()
 
 onMounted(() => {
   restoreSession()
+
+  if (applicantNric.value) {
+    void applicationStore.loadLinkedApplications(applicantNric.value)
+  }
 })
 </script>
 

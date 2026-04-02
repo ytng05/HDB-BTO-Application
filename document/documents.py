@@ -47,7 +47,7 @@ class Document(db.Model):
     __tablename__ = "documents"
 
     document_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    application_id = db.Column(db.BigInteger, nullable=True)
+    application_id = db.Column(db.BigInteger, nullable=False)
     document_type = db.Column(db.String(20), nullable=False)
     storage_path = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(20), nullable=False)
@@ -578,6 +578,17 @@ def _parse_optional_int(raw_value, field_name):
         return None, f"{field_name} must be an integer."
 
 
+def _parse_required_int(raw_value, field_name):
+    value = (raw_value or "").strip()
+    if not value:
+        return None, f"{field_name} is required."
+
+    try:
+        return int(value), None
+    except ValueError:
+        return None, f"{field_name} must be an integer."
+
+
 def detect_doc_type(text):
     # Check income variants first so HDB-branded income letters are not
     # mistaken for HFE letters.
@@ -709,9 +720,9 @@ def extract():
                 description: PDF file to extract.
               application_id:
                 type: integer
-                description: Optional application identifier stored with the document record.
+                description: Application identifier stored with the document record.
           example:
-            application_id: 1001
+            application_id: 2001
     responses:
       200:
         description: OCR extraction completed successfully and the document was stored.
@@ -731,7 +742,7 @@ def extract():
                 statement_reference: CPF-2025-STM-00841
                 average_monthly_income: 7233.33
       400:
-        description: Missing file, unsupported upload type, or invalid application_id.
+        description: Missing file, missing application_id, unsupported upload type, or invalid application_id.
         content:
           application/json:
             examples:
@@ -740,7 +751,7 @@ def extract():
                   error: "No file uploaded. Send a PDF as form-data field 'file'."
               invalidApplicationId:
                 value:
-                  error: "application_id must be an integer."
+                  error: "application_id is required."
       422:
         description: Document type could not be identified from the PDF contents.
         content:
@@ -760,7 +771,7 @@ def extract():
         return jsonify({"error": "No file uploaded. Send a PDF as form-data field 'file'."}), 400
 
     uploaded = request.files["file"]
-    application_id, application_id_error = _parse_optional_int(request.form.get("application_id"), "application_id")
+    application_id, application_id_error = _parse_required_int(request.form.get("application_id"), "application_id")
     if application_id_error:
         return jsonify({"error": application_id_error}), 400
 

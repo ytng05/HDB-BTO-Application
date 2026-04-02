@@ -1,35 +1,51 @@
-/**
- * MyInfo service — mock implementation.
- *
- * In dev/demo mode, resolves personas from the local mockpass dataset.
- * When the real SingPass integration is ready, replace the function bodies
- * with HTTP calls to your backend's MyInfo proxy — the exported interface
- * stays the same so nothing else in the app needs to change.
- */
-import { myinfoPersonas, type MyInfoPersona } from '@/data/myinfoPersonas'
+import type { MyInfoPersona } from '@/data/myinfoPersonas'
 
-/**
- * Simulate a SingPass login — returns only the name, as a real SingPass
- * auth callback does. Returns null if the NRIC is not in the mock dataset.
- */
+const SINGPASS_API_URL = import.meta.env.VITE_SINGPASS_URL ?? 'http://localhost:5007'
+
+interface SingpassLoginResponse {
+  nric: string
+  name: string
+}
+
 export async function singpassLogin(nric: string): Promise<{ name: string } | null> {
-  const persona = await getMyInfoProfile(nric)
-  if (!persona) return null
-  return { name: persona.name.value }
+  const response = await fetch(`${SINGPASS_API_URL}/singpass/login`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      nric,
+    }),
+  })
+
+  if (response.status === 404) {
+    return null
+  }
+
+  if (!response.ok) {
+    throw new Error('Unable to sign in with Singpass right now.')
+  }
+
+  const payload = (await response.json()) as SingpassLoginResponse
+  return { name: payload.name }
 }
 
-/**
- * Retrieve the full MyInfo profile for an authenticated user.
- * This is a separate, consent-gated step — not part of login.
- *
- * Replace with: GET /myinfo/person?nric=... (proxied through your backend)
- */
 export async function getMyInfoProfile(nric: string): Promise<MyInfoPersona | null> {
-  const upper = nric.trim().toUpperCase()
-  return (myinfoPersonas[upper] as MyInfoPersona) ?? null
+  const response = await fetch(
+    `${SINGPASS_API_URL}/singpass/profile?nric=${encodeURIComponent(nric.trim().toUpperCase())}`,
+  )
+
+  if (response.status === 404) {
+    return null
+  }
+
+  if (!response.ok) {
+    throw new Error('Unable to retrieve MyInfo data right now.')
+  }
+
+  return (await response.json()) as MyInfoPersona
 }
 
-/** Maps MyInfo marital status codes to display labels */
 export function mapMaritalStatus(code: string | undefined): string {
   const map: Record<string, string> = {
     '1': 'Single',
@@ -37,8 +53,8 @@ export function mapMaritalStatus(code: string | undefined): string {
     '3': 'Widowed',
     '4': 'Separated',
     '5': 'Divorced',
-    '6': 'Single', // Void Marriage → treat as Single for HDB purposes
-    '9': 'Single', // Others
+    '6': 'Single',
+    '9': 'Single',
   }
   return map[code ?? ''] ?? ''
 }

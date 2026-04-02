@@ -1,30 +1,50 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApplicationStore } from '@/stores/application'
 
 const router = useRouter()
 const applicationStore = useApplicationStore()
 
-const isSubmitted = computed(() => applicationStore.hasSubmitted)
-const heading = computed(() => (isSubmitted.value ? 'Application Review' : 'Review Your Details'))
+const isSubmitted = computed(() => applicationStore.isCurrentSubmitted || applicationStore.hasSubmitted)
+const isSaving = ref(false)
+const isProceeding = ref(false)
+const heading = computed(() => (isSubmitted.value ? 'Submitted Application' : 'Review Your Details'))
 const description = computed(() =>
   isSubmitted.value
-    ? 'This is the information currently stored for your application.'
-    : 'Review the information below before proceeding to payment.',
+    ? 'This application is already submitted. You can still review the details and save updates, but you cannot create a second submission.'
+    : 'Review the information below before we check eligibility and proceed to payment.',
 )
-const primaryLabel = computed(() => (isSubmitted.value ? 'Back to Dashboard' : 'Proceed to Payment'))
+const primaryLabel = computed(() =>
+  isSubmitted.value ? 'Edit Application' : 'Check Eligibility & Proceed to Payment',
+)
+const saveLabel = computed(() => (isSubmitted.value ? 'Save Updates' : 'Save Draft'))
 
-function handlePrimaryAction() {
+async function saveApplication() {
+  isSaving.value = true
+  await applicationStore.saveDraft('review')
+  isSaving.value = false
+}
+
+async function handlePrimaryAction() {
   if (isSubmitted.value) {
-    router.push({
-      path: '/',
-      hash: '#dashboard',
-    })
+    await router.push('/apply/details')
     return
   }
 
-  router.push('/apply/payment')
+  isProceeding.value = true
+
+  try {
+    const preparation = await applicationStore.prepareSubmission()
+    if (!preparation) {
+      return
+    }
+
+    console.log('Eligibility result:', preparation.eligibility)
+    await router.push('/apply/payment')
+  } finally {
+    isProceeding.value = false
+  }
 }
 </script>
 
@@ -61,12 +81,6 @@ function handlePrimaryAction() {
         <p class="detail-value">{{ applicationStore.form.maritalStatus || 'Not provided' }}</p>
       </div>
       <div class="surface review-card">
-        <p class="detail-label">Monthly Household Income</p>
-        <p class="detail-value">
-          {{ applicationStore.form.monthlyHouseholdIncome ? `$${applicationStore.form.monthlyHouseholdIncome}` : 'Not provided' }}
-        </p>
-      </div>
-      <div class="surface review-card">
         <p class="detail-label">Preferred Town Area</p>
         <p class="detail-value">{{ applicationStore.form.preferredTown || 'Not selected' }}</p>
       </div>
@@ -96,10 +110,27 @@ function handlePrimaryAction() {
       >
         {{ isSubmitted ? 'Return Home' : 'Back' }}
       </button>
-      <button class="btn btn-primary" type="button" @click="handlePrimaryAction">
-        {{ primaryLabel }}
-      </button>
+      <div class="step-actions__group">
+        <button class="btn btn-secondary" type="button" :disabled="isSaving" @click="saveApplication">
+          {{ isSaving ? 'Saving...' : saveLabel }}
+        </button>
+        <button
+          class="btn btn-primary"
+          type="button"
+          :disabled="isProceeding || applicationStore.isPreparingSubmission"
+          @click="handlePrimaryAction"
+        >
+          {{ isProceeding || applicationStore.isPreparingSubmission ? 'Checking Eligibility...' : primaryLabel }}
+        </button>
+      </div>
     </div>
+
+    <p v-if="applicationStore.draftSaveMessage" class="review-feedback review-feedback--success">
+      {{ applicationStore.draftSaveMessage }}
+    </p>
+    <p v-if="applicationStore.draftSaveError" class="review-feedback review-feedback--error">
+      {{ applicationStore.draftSaveError }}
+    </p>
   </div>
 </template>
 
@@ -154,6 +185,27 @@ function handlePrimaryAction() {
   margin-top: 28px;
 }
 
+.step-actions__group {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.review-feedback {
+  margin: 14px 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.review-feedback--success {
+  color: #1a7f37;
+}
+
+.review-feedback--error {
+  color: #c8102e;
+}
+
 @media (max-width: 720px) {
   .review-grid {
     grid-template-columns: 1fr;
@@ -161,6 +213,10 @@ function handlePrimaryAction() {
 
   .step-actions {
     flex-direction: column-reverse;
+  }
+
+  .step-actions__group {
+    flex-direction: column;
   }
 }
 </style>

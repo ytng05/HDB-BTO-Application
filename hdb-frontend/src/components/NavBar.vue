@@ -10,6 +10,14 @@ const route = useRoute()
 const applicationStore = useApplicationStore()
 const { applicantName, isLoggedIn, login, logout, setSessionNric } = useAuth()
 
+const demoAccounts = [
+  'S9812381D',
+  'S9812382B',
+  'S9912375C',
+  'S9912365F',
+  'S9812346F',
+]
+
 const showModal = ref(false)
 const nric = ref('')
 const isLoading = ref(false)
@@ -40,9 +48,10 @@ async function handleLogin() {
     const name = profile?.name ?? formattedNric
     const digits = formattedNric.replace(/\D/g, '').slice(0, 6)
     const id = Number.parseInt(digits || '100001', 10)
-    applicationStore.startApplicationLogin(formattedNric)
-    login(id, name)
+    applicationStore.startApplicationLogin(formattedNric, name)
+    login(id, name, formattedNric)
     setSessionNric(formattedNric)
+    await applicationStore.loadLinkedApplications(formattedNric)
     closeModal()
   } catch {
     loginError.value = 'Login failed. Please try again.'
@@ -68,6 +77,11 @@ function isActiveLink(linkId: string) {
   if (linkId === 'dashboard') return route.path === '/' && route.hash === '#dashboard'
   if (linkId === 'launches') return route.path === '/' && route.hash === '#launches'
   return false
+}
+
+function handleLogout() {
+  applicationStore.resetApplication()
+  logout()
 }
 </script>
 
@@ -99,7 +113,7 @@ function isActiveLink(linkId: string) {
             <UserRound :size="16" />
             <span>{{ applicantName }}</span>
           </span>
-          <button class="nav-logout" type="button" aria-label="Logout" @click="logout">
+          <button class="nav-logout" type="button" aria-label="Logout" @click="handleLogout">
             <LogOut :size="17" />
           </button>
         </template>
@@ -130,9 +144,15 @@ function isActiveLink(linkId: string) {
 
         <div class="demo-hint">
           <strong>Demo NRICs:</strong>
-          <button type="button" class="demo-pill" @click="nric = 'S1234567A'">S1234567A</button>
-          <button type="button" class="demo-pill" @click="nric = 'S7654321D'">S7654321D</button>
-          <button type="button" class="demo-pill" @click="nric = 'S9812379B'">S9812379B</button>
+          <button
+            v-for="account in demoAccounts"
+            :key="account"
+            type="button"
+            class="demo-pill"
+            @click="nric = account"
+          >
+            {{ account }}
+          </button>
         </div>
 
         <form @submit.prevent="handleLogin">
