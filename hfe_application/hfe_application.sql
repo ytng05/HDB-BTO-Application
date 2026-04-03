@@ -142,7 +142,7 @@ INSERT INTO hfe_application (
     '2020-04-16',
     '2020-09-30'
 ),
--- 101. Scenario 1: Lena Ong Jia Hui + Sarah Lim Mei Yen — eligible for 2-Room Flexi
+-- 101. Scenario 1: Lena Ong Jia Hui + Sarah Lim Mei Yen — eligible for 3-Room
 (
     101,
     'S9401234L',
@@ -151,7 +151,7 @@ INSERT INTO hfe_application (
     'SARAH LIM MEI YEN',
     5500.00,
     'ELIGIBLE',
-    '2-Room Flexi',
+    '3-Room',
     'Public Scheme (Married Couple / Singapore Citizen)',
     120000.00,
     55000.00,

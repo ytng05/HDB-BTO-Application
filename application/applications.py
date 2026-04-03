@@ -143,7 +143,6 @@ class ApplicationMember(db.Model):
     def to_dict(self):
         return {
             "member_id": self.member_id,
-            "application_id": self.application_id,
             "member_role": self.member_role,
             "nric_fin": self.nric_fin,
             "full_name": self.full_name,
@@ -431,7 +430,7 @@ def create_application():
             properties:
               exercise_id:
                 type: integer
-                example: 202601
+                example: 6
               project_id:
                 type: integer
                 example: 1

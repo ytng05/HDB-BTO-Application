@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '@/views/HomeView.vue'
 import ApplyLayout from '@/views/ApplyLayout.vue'
 import FlatSelectionView from '@/views/FlatSelectionView.vue'
+import AdminBallotView from '@/views/AdminBallotView.vue'
 import ApplyDetailsView from '@/views/apply/ApplyDetailsView.vue'
 import ApplyPaymentView from '@/views/apply/ApplyPaymentView.vue'
 import ApplyReviewView from '@/views/apply/ApplyReviewView.vue'
@@ -94,6 +95,14 @@ const router = createRouter({
     {
       path: '/flat-selection',
       redirect: '/select-flat',
+    },
+    {
+      path: '/admin/ballot',
+      name: 'admin-ballot',
+      component: AdminBallotView,
+      meta: {
+        requiresAuth: true,
+      },
     },
   ],
 })

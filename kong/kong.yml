@@ -38,11 +38,11 @@ services:
           - /api/allocation
         strip_path: true
 
-  # --- Flat Availability Service ---
-  - name: flat-availability-service
-    url: http://flat-availability-service:5006
+  # --- Flat Service ---
+  - name: flat-service
+    url: http://flat-service:5006
     routes:
-      - name: flat-availability-route
+      - name: flat-route
         paths:
           - /api/availability
         strip_path: true

@@ -12,7 +12,7 @@ Service can extract all required fields without OCR.
 
 Scenarios
 ---------
-1  LENA ONG + SARAH LIM      Couple   2-Room  PASS   co-applicant present, valid HFE
+1  LENA ONG + SARAH LIM      Couple   3-Room  PASS   co-applicant present, valid HFE
 2  RYAN TAN + SARAH LIM      Couple   4-Room  PASS   combined income < ceiling, valid HFE
 3  DANIEL GOH + MARCUS LIM   Couple   3-Room  FAIL   income rose to $8,500 after HFE issued at $6,500
 4  JASMINE TAN + MARCUS LIM  Couple   4-Room  FAIL   HFE expired June 2024
@@ -31,6 +31,7 @@ OUT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Low-level helper
 # ---------------------------------------------------------------------------
 
+# Builds a simple PDF file from a list of text lines.
 def make_pdf(filename: str, lines: list[str]) -> str:
     """Write a simple single-column PDF with the given text lines."""
     path = os.path.join(OUT_DIR, filename)
@@ -69,6 +70,7 @@ def make_pdf(filename: str, lines: list[str]) -> str:
 # Income document templates
 # ---------------------------------------------------------------------------
 
+# Generates a CPF contribution history PDF for one applicant.
 def cpf_contribution_history(
     filename: str,
     full_name: str,
@@ -123,6 +125,7 @@ def cpf_contribution_history(
     return make_pdf(filename, lines)
 
 
+# Handles joint income statement.
 def joint_income_statement(
     filename: str,
     main_name: str,
@@ -198,6 +201,7 @@ def joint_income_statement(
 # HFE letter templates
 # ---------------------------------------------------------------------------
 
+# Generates a single-applicant HFE eligibility letter PDF.
 def hfe_single(
     filename: str,
     applicant_name: str,
@@ -242,6 +246,7 @@ def hfe_single(
     return make_pdf(filename, lines)
 
 
+# Handles hfe couple.
 def hfe_couple(
     filename: str,
     main_name: str,
@@ -296,15 +301,16 @@ def hfe_couple(
 # Generate all 5 scenarios
 # ---------------------------------------------------------------------------
 
+# Creates all scenario income and HFE PDFs for test runs.
 def main():
     print("Generating test scenario PDFs...\n")
 
     # -----------------------------------------------------------------------
-    # Scenario 1: LENA ONG + SARAH LIM — Couple, 2-Room Flexi, PASS
+    # Scenario 1: LENA ONG + SARAH LIM — Couple, 3-Room, PASS
     # Combined income $5,500/month < $7,000 ceiling. HFE valid until Dec 2026.
     # Lena $5,000/month + Sarah $500/month = $5,500/month combined.
     # -----------------------------------------------------------------------
-    print("Scenario 1: Lena Ong + Sarah Lim — Couple, 2-Room Flexi, PASS")
+    print("Scenario 1: Lena Ong + Sarah Lim — Couple, 3-Room, PASS")
     joint_income_statement(
         filename="scenario_1_lena_ong_income.pdf",
         main_name="LENA ONG JIA HUI",
@@ -337,7 +343,7 @@ def main():
         mydoc_ref="20260115-090000-9401234L",
         date_of_issue="15 January 2026",
         valid_until="31 December 2026",
-        eligible_flat_types="2-Room Flexi",
+        eligible_flat_types="3-Room",
         application_scheme="Public Scheme (Married Couple / Singapore Citizen)",
         hdb_loan_ceiling=120_000,
         total_household_income=5_500.00,

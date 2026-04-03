@@ -6,13 +6,14 @@ import {
   type ApplyBtoApplicationPayload,
   type ApplicationMemberRecord,
   type ApplicationRecord,
+  fetchAvailableFlats,
 } from '@/services/api'
 import type { MyInfoPersona } from '@/data/myinfoPersonas'
 
 const STORAGE_KEY = 'hdb-flat-portal-application'
-const DEFAULT_EXERCISE_ID = 202601
+const DEFAULT_EXERCISE_ID = 6
 
-export type ApplicationStatus = 'editing' | 'processing' | 'balloted' | 'selected'
+export type ApplicationStatus = 'editing' | 'processing' | 'successful' | 'balloted' | 'selected'
 export type HouseholdMemberRole = 'CO_APPLICANT' | 'OCCUPANT'
 
 export interface ApplicationForm {
@@ -107,10 +108,10 @@ const fieldLabels: Record<keyof ApplicationForm, string> = {
 const townOptions = ['Tengah', 'Kallang/Whampoa', 'Queenstown', 'Punggol'] as const
 
 const developmentByTown: Record<string, string> = {
-  Tengah: 'Tengah GreenVille',
-  'Kallang/Whampoa': 'Kallang Horizon',
-  Queenstown: 'Queenstown Ridges',
-  Punggol: 'Punggol Waterway Terraces',
+  Tengah: 'Tengah Garden Walk',
+  'Kallang/Whampoa': 'Kallang RiverFront',
+  Queenstown: 'Queenstown SkyGrove',
+  Punggol: 'Punggol SeaVista',
 }
 
 const projectIdByTown: Record<string, number> = {
@@ -211,6 +212,33 @@ function buildAvailableUnits(preferredTown: string): AvailableUnit[] {
     development,
     ...template,
   }))
+}
+
+function mapFlatServiceRowToUnit(row: {
+  flat_id: number
+  floor_number: number
+  unit_number: string
+  area_sqm: number
+  price: number
+  project_name: string
+}): AvailableUnit {
+  const floorNumber = Number.isFinite(row.floor_number) ? Number(row.floor_number) : 0
+  const unit = String(row.unit_number ?? '').trim()
+  const unitNumber = unit.includes('-')
+    ? unit
+    : unit
+      ? `${String(floorNumber).padStart(2, '0')}-${unit}`
+      : String(row.flat_id)
+
+  return {
+    id: row.flat_id,
+    unitNumber,
+    floor: floorNumber,
+    facing: 'N/A',
+    sqm: Number(row.area_sqm ?? 0),
+    price: Number(row.price ?? 0),
+    development: row.project_name || 'HDB Development',
+  }
 }
 
 function readPersistedState(): PersistedApplicationState | null {
@@ -385,8 +413,16 @@ export const useApplicationStore = defineStore('application', () => {
   const linkedNric = ref<string | null>(persistedState?.linkedNric ?? null)
   const currentApplicationId = ref<number | null>(persistedState?.currentApplicationId ?? null)
   const applicationError = ref('')
+  const availableUnitsState = ref<AvailableUnit[]>([])
+  const isLoadingAvailableUnits = ref(false)
 
-  const availableUnits = computed(() => buildAvailableUnits(form.value.preferredTown))
+  const availableUnits = computed(() => {
+    if (availableUnitsState.value.length > 0) {
+      return availableUnitsState.value
+    }
+
+    return buildAvailableUnits(form.value.preferredTown)
+  })
   const developmentName = computed(() => developmentByTown[form.value.preferredTown] ?? 'HDB Development')
   const hasBallotAccess = computed(() => ['balloted', 'selected'].includes(status.value))
   const hasRequiredDocuments = computed(
@@ -404,7 +440,9 @@ export const useApplicationStore = defineStore('application', () => {
   const isCurrentSubmitted = computed(
     () =>
       currentApplication.value?.application_status === 'SUBMITTED' ||
-      status.value === 'processing',
+      currentApplication.value?.application_status === 'SUCCESSFUL' ||
+      status.value === 'processing' ||
+      status.value === 'successful',
   )
   const firstSubmitted = computed(() => submittedApplications.value[0] ?? null)
   const hasSubmittedApplication = computed(() => submittedApplications.value.length > 0)
@@ -462,6 +500,7 @@ export const useApplicationStore = defineStore('application', () => {
     queueNumber.value = null
     selectedUnit.value = null
     lastSubmittedAt.value = null
+    availableUnitsState.value = []
   }
 
   function clearSubmissionCache() {
@@ -478,6 +517,10 @@ export const useApplicationStore = defineStore('application', () => {
     ) {
       currentApplicationId.value = null
     }
+  }
+
+  function replaceLinkedApplicationsForNric(nric: string, applications: ApplicationRecord[]) {
+    setLinkedApplications(nric, applications)
   }
 
   function clearLinkedApplications() {
@@ -852,7 +895,13 @@ export const useApplicationStore = defineStore('application', () => {
     currentApplicationId.value = application.application_id
     if (!openingCurrentApplication) {
       clearLocalWorkflowState()
-      status.value = application.application_status === 'SUBMITTED' ? 'processing' : 'editing'
+      if (application.application_status === 'SUCCESSFUL') {
+        status.value = 'successful'
+      } else if (application.application_status === 'SUBMITTED') {
+        status.value = 'processing'
+      } else {
+        status.value = 'editing'
+      }
     }
 
     lastSubmittedAt.value = application.submitted_at
@@ -905,6 +954,42 @@ export const useApplicationStore = defineStore('application', () => {
   function reserveUnit(unit: AvailableUnit) {
     selectedUnit.value = unit
     status.value = 'selected'
+  }
+
+  async function loadAvailableUnits() {
+    const preferredTown = form.value.preferredTown
+    if (!hasText(preferredTown)) {
+      availableUnitsState.value = []
+      return
+    }
+
+    const params: { town?: string; flat_type?: string; project_id?: number } = {
+      town: preferredTown,
+    }
+
+    const projectId = projectIdByTown[preferredTown]
+    if (projectId) {
+      params.project_id = projectId
+    }
+
+    if (hasText(form.value.flatType)) {
+      params.flat_type = form.value.flatType
+    }
+
+    isLoadingAvailableUnits.value = true
+    try {
+      const { status: httpStatus, data } = await fetchAvailableFlats(params)
+      if (httpStatus === 200 && Array.isArray(data.data)) {
+        availableUnitsState.value = data.data.map((row) => mapFlatServiceRowToUnit(row))
+        return
+      }
+
+      availableUnitsState.value = []
+    } catch {
+      availableUnitsState.value = []
+    } finally {
+      isLoadingAvailableUnits.value = false
+    }
   }
 
   function setDocument(documentKey: 'incomePdfName' | 'hfeLetterPdfName', file: File | null) {
@@ -965,10 +1050,12 @@ export const useApplicationStore = defineStore('application', () => {
     hasSubmittedApplication,
     isCurrentSubmitted,
     availableUnits,
+    isLoadingAvailableUnits,
     developmentName,
     hasBallotAccess,
     hasRequiredDocuments,
     syncSessionApplications,
+    replaceLinkedApplicationsForNric,
     storeApplicationRecord,
     clearLinkedApplications,
     beginNewApplication,
@@ -983,6 +1070,7 @@ export const useApplicationStore = defineStore('application', () => {
     resetFormProgress,
     markBalloted,
     reserveUnit,
+    loadAvailableUnits,
     setDocument,
     resetApplication,
   }

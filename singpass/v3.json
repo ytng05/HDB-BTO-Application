@@ -38068,10 +38068,10 @@
       },
       "marital": {
         "lastupdated": "2026-04-03",
-        "code": "1",
+        "code": "2",
         "source": "1",
         "classification": "C",
-        "desc": "SINGLE"
+        "desc": "MARRIED"
       },
       "nationality": {
         "lastupdated": "2026-04-03",
@@ -38104,6 +38104,17 @@
         "source": "2",
         "classification": "C",
         "value": 5500
+      },
+      "noa": {
+        "lastupdated": "2026-04-03",
+        "source": "1",
+        "classification": "C",
+        "yearofassessment": {
+          "value": "2025"
+        },
+        "amount": {
+          "value": 66000
+        }
       }
     },
     "S9501234R": {

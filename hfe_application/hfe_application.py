@@ -38,7 +38,7 @@ SCENARIO_HFE_RECORDS = (
         "co_applicant_name": "SARAH LIM MEI YEN",
         "total_household_income": 5500.00,
         "assessment_outcome": "ELIGIBLE",
-        "eligible_flat_types": "2-Room Flexi",
+        "eligible_flat_types": "3-Room",
         "application_scheme": "Public Scheme (Married Couple / Singapore Citizen)",
         "hdb_loan_ceiling": 120000.00,
         "total_grants_eligible": 55000.00,

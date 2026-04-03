@@ -6,7 +6,7 @@ services:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: documents
     ports:
-      - "3312:3306"
+      - "3350:3306"
     volumes:
       - document_db_data:/var/lib/mysql
       - ./document/documents.sql:/docker-entrypoint-initdb.d/documents.sql:ro
@@ -36,7 +36,7 @@ services:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: applications
     ports:
-      - "3313:3306"
+      - "3304:3306"
     volumes:
       - application_db_data:/var/lib/mysql
       - ./application/applications.sql:/docker-entrypoint-initdb.d/applications.sql:ro
@@ -73,7 +73,7 @@ services:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: hfe_applications
     ports:
-      - "3314:3306"
+      - "3309:3306"
     volumes:
       - hfe_application_db_data:/var/lib/mysql
       - ./hfe_application/hfe_application.sql:/docker-entrypoint-initdb.d/hfe_application.sql:ro
@@ -102,9 +102,30 @@ services:
     environment:
       DOCUMENT_SERVICE_URL: http://document-service:5050
       HFE_APPLICATION_SERVICE_URL: http://hfe-application-service:5009
+    restart: always
+
+  validate-eligibility-service:
+    build:
+      context: ./validate_eligibility
+      dockerfile: Dockerfile
+    container_name: validate_eligibility_service
+    ports:
+      - "5013:5013"
+    environment:
+      SINGPASS_SERVICE_URL: http://singpass-service:5007
+      APPLICATION_SERVICE_URL: http://application-service:5004
     depends_on:
-      - document-service
-      - hfe-application-service
+      - singpass-service
+      - application-service
+    restart: always
+
+  ballot-service:
+    build:
+      context: ./ballot
+      dockerfile: Dockerfile
+    container_name: ballot_service
+    ports:
+      - "5005:5005"
     restart: always
 
   apply-bto-service:
@@ -119,10 +140,6 @@ services:
       APPLICATION_SERVICE_URL: http://application-service:5004
       CHECK_ELIGIBILITY_SERVICE_URL: http://check-eligibility-service:5008
       APPLICATION_FEE: 10
-    depends_on:
-      - nets-payment-service
-      - application-service
-      - check-eligibility-service
     restart: always
 
   nets-payment-service:
@@ -146,7 +163,152 @@ services:
       HDB_PORTAL_URL: ${HDB_PORTAL_URL:-http://localhost:5173}
     restart: always
 
+  ballot-audit-db:
+    image: mysql:8.0
+    container_name: ballot_audit_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ballot_audits
+    ports:
+      - "3300:3306"
+    volumes:
+      - ballot_audit_db_data:/var/lib/mysql
+      - ./ballot_audit/ballot_audits.sql:/docker-entrypoint-initdb.d/ballot_audits.sql:ro
+    restart: always
+
+  ballot-audit-service:
+    build:
+      context: ./ballot_audit
+      dockerfile: Dockerfile
+    container_name: ballot_audit_service
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://root:root@ballot-audit-db:3306/ballot_audits
+      PROCESS_BALLOT_SERVICE_URL: http://process-ballot-service:5011
+      REQUEST_TIMEOUT_SECONDS: 20
+      SCHEDULER_TIMEZONE: Asia/Singapore
+    depends_on:
+      - ballot-audit-db
+    restart: always
+
+  flat-db:
+    image: mysql:8.0
+    container_name: flat_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: flat_availability
+    ports:
+      - "3307:3306"
+    volumes:
+      - flat_db_data:/var/lib/mysql
+      - ./flat/flats.sql:/docker-entrypoint-initdb.d/flats.sql:ro
+    restart: always
+
+  flat-service:
+    build:
+      context: ./flat
+      dockerfile: Dockerfile
+    container_name: flat_service
+    ports:
+      - "5006:5006"
+    environment:
+      DB_HOST: flat-db
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: flat_availability
+    depends_on:
+      - flat-db
+    restart: always
+
+  flat-selection-db:
+    image: mysql:8.0
+    container_name: flat_selection_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: flat_selection
+    ports:
+      - "3302:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -proot --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - flat_selection_db_data:/var/lib/mysql
+      - ./flat_selection/flat_selection.sql:/docker-entrypoint-initdb.d/flat_selection.sql:ro
+    restart: always
+
+  flat-selection-service:
+    build:
+      context: ./flat_selection
+      dockerfile: Dockerfile
+    container_name: flat_selection_service
+    ports:
+      - "5002:5002"
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://root:root@flat-selection-db:3306/flat_selection
+    depends_on:
+      flat-selection-db:
+        condition: service_healthy
+    restart: always
+
+  project-db:
+    image: mysql:8.0
+    container_name: project_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: projects
+    ports:
+      - "3312:3306"
+    volumes:
+      - project_db_data:/var/lib/mysql
+      - ./project/projects.sql:/docker-entrypoint-initdb.d/projects.sql:ro
+    restart: always
+
+  project-service:
+    build:
+      context: ./project
+      dockerfile: Dockerfile
+    container_name: project_service
+    ports:
+      - "5012:5012"
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://root:root@project-db:3306/projects
+    depends_on:
+      - project-db
+    restart: always
+
+  process-ballot-service:
+    build:
+      context: ./process_ballot
+      dockerfile: Dockerfile
+    container_name: process_ballot_service
+    ports:
+      - "5011:5011"
+    environment:
+      BALLOT_AUDIT_SERVICE_URL: http://ballot-audit-service:5000
+      BALLOT_SERVICE_URL: http://ballot-service:5005
+      APPLICATION_SERVICE_URL: http://application-service:5004
+      PROJECT_SERVICE_URL: http://project-service:5012
+      VALIDATE_ELIGIBILITY_SERVICE_URL: http://validate-eligibility-service:5013
+      FLAT_SELECTION_SERVICE_URL: http://flat-selection-service:5002
+      REQUEST_TIMEOUT_SECONDS: 20
+    depends_on:
+      - application-service
+      - project-service
+      - validate-eligibility-service
+      - ballot-service
+      - flat-selection-service
+    restart: always
+
 volumes:
   document_db_data:
   application_db_data:
   hfe_application_db_data:
+  ballot_audit_db_data:
+  flat_db_data:
+  flat_selection_db_data:
+  project_db_data:

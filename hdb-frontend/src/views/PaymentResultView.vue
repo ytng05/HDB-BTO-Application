@@ -167,7 +167,11 @@ async function finaliseWorkflow() {
     if (response.status === 200) {
       statusMessage.value = buildCompletedMessage(response.data)
       clearStoredPaymentRef()
-      applicationStore.status = 'processing'
+      const completedSuccessfully =
+        response.data.eligible === true || response.data.application_status === 'SUCCESSFUL'
+
+      applicationStore.status = completedSuccessfully ? 'successful' : 'editing'
+      applicationStore.queueNumber = null
       applicationStore.lastSubmittedAt = new Date().toISOString()
       return
     }

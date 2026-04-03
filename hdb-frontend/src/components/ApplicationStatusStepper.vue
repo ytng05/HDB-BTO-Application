@@ -11,7 +11,11 @@ const trackerSteps = computed(() => {
   const currentStatus = props.status
 
   const processingState =
-    currentStatus === 'editing' ? 'locked' : currentStatus === 'processing' ? 'active' : 'complete'
+    currentStatus === 'editing'
+      ? 'locked'
+      : currentStatus === 'successful' || currentStatus === 'balloted' || currentStatus === 'selected'
+        ? 'complete'
+        : 'active'
 
   const ballotState =
     currentStatus === 'balloted' ? 'active' : currentStatus === 'selected' ? 'complete' : 'locked'
@@ -23,7 +27,7 @@ const trackerSteps = computed(() => {
       icon: FileCheck2,
     },
     {
-      label: 'Processing',
+      label: currentStatus === 'processing' ? 'Processing' : 'Application Successful',
       state: processingState,
       icon: Clock3,
     },

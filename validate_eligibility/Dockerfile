@@ -7,6 +7,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 5000
+EXPOSE 5013
 
-CMD ["python", "ballot_audits.py"]
+CMD ["python", "validate_eligibility.py"]

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Building2, Hash, MapPinned, Ruler, SunMedium, CheckCircle2 } from 'lucide-vue-next'
 import SelectionModal from '@/components/SelectionModal.vue'
 import { useApplicationStore, type AvailableUnit } from '@/stores/application'
@@ -9,6 +9,7 @@ const applicationStore = useApplicationStore()
 const focusedUnit = ref<AvailableUnit | null>(applicationStore.selectedUnit)
 const isModalOpen = ref(false)
 const successMessage = ref('')
+const loadError = ref('')
 
 // Floor filter — empty set means "show all"
 const selectedFloors = ref<Set<number>>(new Set())
@@ -90,6 +91,15 @@ function openConfirmModal() {
   if (!focusedUnit.value || !canSelectUnit.value) return
   isModalOpen.value = true
 }
+
+onMounted(async () => {
+  loadError.value = ''
+  try {
+    await applicationStore.loadAvailableUnits()
+  } catch {
+    loadError.value = 'Unable to load available flats at the moment.'
+  }
+})
 </script>
 
 <template>
@@ -98,8 +108,12 @@ function openConfirmModal() {
       <header class="page-header">
         <p class="eyebrow">Flat Selection</p>
         <h1 class="page-title">{{ applicationStore.developmentName }}</h1>
-        <p class="page-subtitle">Queue Number: {{ applicationStore.queueNumber }}</p>
+        <p class="page-subtitle page-subtitle--queue">Queue Number: {{ applicationStore.queueNumber }}</p>
       </header>
+
+      <p v-if="loadError" class="load-error">{{ loadError }}</p>
+
+      <p v-else-if="applicationStore.isLoadingAvailableUnits" class="load-hint">Loading available flats...</p>
 
       <div v-if="successMessage" class="success-banner">
         <CheckCircle2 :size="18" />
@@ -267,6 +281,32 @@ function openConfirmModal() {
   color: var(--color-green);
   background: rgba(26, 127, 75, 0.08);
   font-weight: 600;
+}
+
+.page-subtitle--queue {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(200, 16, 46, 0.12);
+  color: var(--color-red);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.load-hint,
+.load-error {
+  margin: 8px 0 0;
+  font-weight: 600;
+}
+
+.load-hint {
+  color: rgba(29, 29, 31, 0.66);
+}
+
+.load-error {
+  color: var(--color-red);
 }
 
 .reserved-card {

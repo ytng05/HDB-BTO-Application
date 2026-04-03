@@ -11,6 +11,11 @@ A microservices-based HDB BTO flat application portal built with Vue 3, Flask, a
 | `hdb-frontend` | 5173 | Vue 3 frontend (Vite) |
 | `document-service` | 5050 | Document OCR for income statements and HFE letters |
 | `nets-payment-service` | 5003 | NETS eNETS B2S payment wrapper |
+| `ballot-audit-service` | 5000 | Stores ballot run audit records |
+| `flat-service` | 5006 | Provides available flat inventory by project |
+| `flat-selection-service` | 5002 | Stores queue entries for ballot outcomes |
+| `project-service` | 5012 | Source of truth for exercises and project ballot status |
+| `process-ballot-service` | 5011 | Orchestrates ballot runs across services |
 
 ---
 
@@ -52,7 +57,7 @@ docker compose up --build
 ```
 
 This starts:
-- Document DB on port `3312`
+- Document DB on port `3350`
 - Document service on `http://localhost:5050`
 - NETS payment service on `http://localhost:5003`
 
@@ -103,8 +108,11 @@ Click **Login** in the navbar and enter an NRIC. Demo accounts:
 
 | NRIC | Name |
 |---|---|
-| `S1234567A` | Aaron Tan |
-| `S7654321D` | Demo User |
+| `S9401234L` | Lena Ong |
+| `S9501234R` | Ryan Tan |
+| `S8901234D` | Daniel Goh |
+| `S9001234J` | Jasmine Tan |
+| `S9201234W` | Wendy Chen |
 
 ### Apply for a Flat
 
@@ -120,7 +128,31 @@ Browse available BTO projects from the **BTO Launches** section on the home page
 
 ---
 
-## 5. Document Service Testing
+## 5. Admin Ballot Testing
+
+After signing in, open `http://localhost:5173/admin/ballot`.
+
+Use the admin page to:
+
+1. Enter an `exercise_id` (for seeded demo data, use `6`)
+2. Click **Execute Ballot** to manually trigger a run
+3. Review:
+   - per-project queue outcomes
+   - invited vs waitlist counts
+   - flat-selection write status
+   - ballot audit history
+
+You can also set recurring ballot runs from the admin page:
+
+1. Use the **Schedule Builder** (daily/weekly/monthly/custom)
+2. Click **Create Schedule**
+3. To edit, select an existing scheduled record and click **Update Selected Schedule**
+
+The admin page triggers `POST /process-ballot/run` for manual runs, while schedule creation and updates now call `ballot-audit` directly (`POST /ballot-audits`, `PUT /ballot-audits/{audit_id}`).
+
+---
+
+## 6. Document Service Testing
 
 The Documents step calls the document service on upload and displays extracted fields inline. To test directly with curl:
 
@@ -146,7 +178,7 @@ curl -L "http://localhost:5050/documents/<document_id>/file" -o saved.pdf
 
 ---
 
-## 6. NETS Payment Flow
+## 7. NETS Payment Flow
 
 The payment uses the eNETS Browser-to-Server (B2S) flow with backend status verification:
 
@@ -165,7 +197,7 @@ Notes:
 
 ---
 
-## 7. End-to-End Test Scenarios
+## 8. End-to-End Test Scenarios
 
 Generate the test PDFs:
 
@@ -177,7 +209,7 @@ The script writes 10 files (income + HFE for each scenario) into `test_scenarios
 
 | Scenario | Applicants | Flat Type | Expected | Reason |
 |---|---|---|---|---|
-| 1 | Lena Ong + Sarah Lim | 2-Room Flexi | PASS | Valid HFE, co-applicant matches, income within ceiling |
+| 1 | Lena Ong + Sarah Lim | 3-Room | PASS | Valid HFE, co-applicant matches, income within ceiling |
 | 2 | Ryan Tan + Sarah Lim | 4-Room | PASS | Valid HFE, combined income within ceiling |
 | 3 | Daniel Goh + Marcus Lim | 3-Room | FAIL | Current income exceeds 3-Room ceiling |
 | 4 | Jasmine Tan + Marcus Lim | 4-Room | FAIL | HFE letter has expired |
@@ -200,7 +232,7 @@ How to test in the app:
 
 ---
 
-## 8. Project Structure
+## 9. Project Structure
 
 ```text
 esd-hdb/

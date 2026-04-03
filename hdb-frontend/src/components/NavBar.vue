@@ -63,19 +63,15 @@ async function handleLogin() {
 const navLinks = computed(() => {
   if (!isLoggedIn.value) return []
 
-  if (route.path === '/') {
-    return [
-      { id: 'dashboard', label: 'Dashboard', to: { path: '/', hash: '#dashboard' } },
-      { id: 'launches', label: 'BTO Launches', to: { path: '/', hash: '#launches' } },
-    ]
-  }
-
-  return []
+  return [
+    { id: 'dashboard', label: 'Dashboard', to: { path: '/', hash: '#dashboard' } },
+    { id: 'admin-ballot', label: 'Admin Ballot', to: { path: '/admin/ballot' } },
+  ]
 })
 
 function isActiveLink(linkId: string) {
-  if (linkId === 'dashboard') return route.path === '/' && route.hash === '#dashboard'
-  if (linkId === 'launches') return route.path === '/' && route.hash === '#launches'
+  if (linkId === 'dashboard') return route.path === '/'
+  if (linkId === 'admin-ballot') return route.path === '/admin/ballot'
   return false
 }
 
@@ -92,7 +88,6 @@ function handleLogout() {
         <span class="brand-mark">HDB</span>
         <span class="brand-copy">
           <strong>Flat Portal</strong>
-          <small>Build-To-Order Services</small>
         </span>
       </RouterLink>
 
