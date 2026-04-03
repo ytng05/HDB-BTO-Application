@@ -100,11 +100,29 @@ services:
     ports:
       - "5008:5008"
     environment:
-      SINGPASS_SERVICE_URL: http://singpass-service:5007
+      DOCUMENT_SERVICE_URL: http://document-service:5050
       HFE_APPLICATION_SERVICE_URL: http://hfe-application-service:5009
     depends_on:
-      - singpass-service
+      - document-service
       - hfe-application-service
+    restart: always
+
+  apply-bto-service:
+    build:
+      context: ./apply_bto
+      dockerfile: Dockerfile
+    container_name: apply_bto_service
+    ports:
+      - "5010:5010"
+    environment:
+      NETS_PAYMENT_SERVICE_URL: http://nets-payment-service:5003
+      APPLICATION_SERVICE_URL: http://application-service:5004
+      CHECK_ELIGIBILITY_SERVICE_URL: http://check-eligibility-service:5008
+      APPLICATION_FEE: 10
+    depends_on:
+      - nets-payment-service
+      - application-service
+      - check-eligibility-service
     restart: always
 
   nets-payment-service:

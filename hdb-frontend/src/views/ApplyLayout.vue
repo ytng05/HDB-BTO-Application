@@ -5,15 +5,15 @@ import ApplicationProgress from '@/components/ApplicationProgress.vue'
 
 const route = useRoute()
 
-const steps = ['Details', 'Documents', 'Payment']
+const steps = ['Application Details', 'Payment']
 const activeIndex = computed(() =>
   typeof route.meta.applyStepIndex === 'number' ? Number(route.meta.applyStepIndex) : -1,
 )
 const showProgress = computed(() => activeIndex.value >= 0)
 const pageSubtitle = computed(() =>
   route.name === 'apply-review'
-    ? 'Review the information tied to your application.'
-    : 'Complete your application in three guided steps.',
+    ? 'View the details currently tied to your application.'
+    : 'Complete your household application details and supporting documents before payment.',
 )
 </script>
 

@@ -1,5 +1,6 @@
-"""OCR service for income statements and HFE letters."""
+﻿"""OCR service for income statements and HFE letters."""
 
+import io
 import hashlib
 import os
 import re
@@ -8,7 +9,10 @@ from pathlib import Path
 try:
     import pymupdf as fitz  # PyMuPDF
 except ImportError:
-    import fitz  # type: ignore[no-redef]
+    try:
+        import fitz  # type: ignore[no-redef]
+    except Exception:  # pragma: no cover - local environment fallback
+        fitz = None  # type: ignore[assignment]
 
 import pytesseract
 from flask import Flask, jsonify, request, send_file
@@ -17,6 +21,11 @@ from flasgger import Swagger
 from flask_sqlalchemy import SQLAlchemy
 from pdf2image import convert_from_bytes
 from PIL import Image, ImageFilter
+
+try:
+    from pypdf import PdfReader
+except ImportError:  # pragma: no cover - optional direct-text fallback
+    PdfReader = None  # type: ignore[assignment]
 
 app = Flask(__name__)
 CORS(app)
@@ -54,6 +63,7 @@ class Document(db.Model):
     fields_json = db.Column(db.JSON, nullable=True)
     uploaded_at = db.Column(db.DateTime, nullable=False, server_default=db.func.current_timestamp())
 
+    # what this function does for the service: Handles to dict for this service.
     def to_dict(self):
         return {
             "document_id": self.document_id,
@@ -66,15 +76,18 @@ class Document(db.Model):
         }
 
 
+# what this function does for the service: Handles init storage for this service.
 def init_storage():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+# what this function does for the service: Handles get document record for this service.
 def get_document_record(document_id):
     return db.session.get(Document, document_id)
 
 
+# what this function does for the service: Handles get existing document for this service.
 def get_existing_document(application_id, document_type):
     if not application_id:
         return None
@@ -86,6 +99,7 @@ def get_existing_document(application_id, document_type):
     return db.session.scalar(query)
 
 
+# what this function does for the service: Handles save document record for this service.
 def save_document_record(
     application_id,
     document_type,
@@ -107,6 +121,7 @@ def save_document_record(
     return existing
 
 
+# what this function does for the service: Handles update document record for this service.
 def update_document_record(document_id, document_type, status, fields):
     existing = get_document_record(document_id)
     if existing is None:
@@ -118,19 +133,22 @@ def update_document_record(document_id, document_type, status, fields):
     db.session.commit()
 
 
+# what this function does for the service: Handles  preprocess for this service.
 def _preprocess(img):
     """Improve OCR accuracy for scanned PDFs."""
     return img.convert("L").point(lambda p: 255 if p > 180 else 0).filter(ImageFilter.SHARPEN)
 
 
+# what this function does for the service: Handles  normalize text for this service.
 def _normalize_text(text):
     text = text.replace("\r", "\n").replace("\xa0", " ")
-    text = text.replace("Ã¢â‚¬â€œ", "-").replace("Ã¢â‚¬â€", "-")
+    text = text.replace("ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“", "-").replace("ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â", "-")
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
+# what this function does for the service: Handles  looks like usable text for this service.
 def _looks_like_usable_text(text):
     stripped = text.strip()
     if len(stripped) < 80:
@@ -140,19 +158,43 @@ def _looks_like_usable_text(text):
     return alpha_count >= 40
 
 
+# what this function does for the service: Handles  extract text with pymupdf for this service.
+def _extract_text_with_pymupdf(pdf_bytes):
+    if fitz is None:
+        return ""
+
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        return "\n\n".join(page.get_text() for page in doc)
+    finally:
+        doc.close()
+
+
+# what this function does for the service: Handles  extract text with pypdf for this service.
+def _extract_text_with_pypdf(pdf_bytes):
+    if PdfReader is None:
+        return ""
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    return "\n\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+# what this function does for the service: Handles pdf bytes to text for this service.
 def pdf_bytes_to_text(pdf_bytes, dpi=200):
     """Extract text from a PDF with OCR fallback for scanned pages."""
     direct_text = ""
 
-    try:
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        direct_text = "\n\n".join(page.get_text() for page in doc)
-        doc.close()
-        direct_text = _normalize_text(direct_text)
-        if _looks_like_usable_text(direct_text):
-            return direct_text
-    except Exception:
-        pass
+    for extractor in (_extract_text_with_pymupdf, _extract_text_with_pypdf):
+        try:
+            candidate = _normalize_text(extractor(pdf_bytes))
+        except Exception:
+            continue
+
+        if _looks_like_usable_text(candidate):
+            return candidate
+
+        if not direct_text and candidate:
+            direct_text = candidate
 
     images = convert_from_bytes(pdf_bytes, dpi=dpi)
     ocr_text = "\n\n".join(
@@ -167,11 +209,13 @@ def pdf_bytes_to_text(pdf_bytes, dpi=200):
     return direct_text or ocr_text
 
 
+# what this function does for the service: Handles  find for this service.
 def _find(pattern, text, flags=re.IGNORECASE):
     match = re.search(pattern, text, flags)
     return match.group(1).strip() if match else None
 
 
+# what this function does for the service: Handles  find money for this service.
 def _find_money(pattern, text):
     raw = _find(pattern, text)
     if not raw:
@@ -183,6 +227,7 @@ def _find_money(pattern, text):
         return None
 
 
+# what this function does for the service: Handles  next non empty line for this service.
 def _next_non_empty_line(lines, start_index):
     for idx in range(start_index, len(lines)):
         value = lines[idx].strip()
@@ -191,6 +236,7 @@ def _next_non_empty_line(lines, start_index):
     return None, start_index
 
 
+# what this function does for the service: Handles  find multiline value for this service.
 def _find_multiline_value(pattern, text, flags=re.IGNORECASE):
     """Extract a value that may span multiple lines after a label."""
     match = re.search(pattern, text, flags)
@@ -203,7 +249,17 @@ def _find_multiline_value(pattern, text, flags=re.IGNORECASE):
     return value or None
 
 
+# what this function does for the service: Handles extract standard income for this service.
 def extract_standard_income(text):
+    if re.search(r"CPF\s+CONTRIBUTION\s+HISTORY", text, re.IGNORECASE):
+        document_variant = "cpf_contribution_history"
+    elif re.search(r"EMPLOYEE\s+INCOME\s+STATEMENT", text, re.IGNORECASE):
+        document_variant = "employee_income_statement"
+    elif re.search(r"PAYSLIP\s+SUMMARY", text, re.IGNORECASE):
+        document_variant = "payslip_summary"
+    else:
+        document_variant = "standard_income_statement"
+
     employer_raw = (
         _find_multiline_value(
             r"Employer Name[:\s]*(.+?)(?:\n(?:Employer UEN|Employment Type|Designation|Occupation|Years of Service)|$)",
@@ -248,7 +304,7 @@ def extract_standard_income(text):
     )
 
     return {
-        "document_variant": "standard_income_statement",
+        "document_variant": document_variant,
         "full_name": full_name,
         "nric": _find(r"NRIC(?:/UIN)?(?:\s+(?:Number|No\.?))?[:\s]+([A-Z]\d{7}[A-Z])", text),
         "date_of_birth": _find(r"Date of Birth[:\s]+(\d{1,2}\s+\w+\s+\d{4})", text),
@@ -268,6 +324,7 @@ def extract_standard_income(text):
     }
 
 
+# what this function does for the service: Handles extract self employed income for this service.
 def extract_self_employed_income(text):
     return {
         "document_variant": "self_employed_income_declaration",
@@ -305,6 +362,7 @@ def extract_self_employed_income(text):
     }
 
 
+# what this function does for the service: Handles  extract joint income applicants for this service.
 def _extract_joint_income_applicants(text):
     applicants = []
 
@@ -350,6 +408,7 @@ def _extract_joint_income_applicants(text):
     return applicants
 
 
+# what this function does for the service: Handles extract joint income for this service.
 def extract_joint_income(text):
     applicants = _extract_joint_income_applicants(text)
     main_applicant = applicants[0] if applicants else {}
@@ -376,6 +435,7 @@ def extract_joint_income(text):
     }
 
 
+# what this function does for the service: Handles extract income for this service.
 def extract_income(text):
     """Extract fields from the supported income document variants."""
     if re.search(r"JOINT\s+INCOME\s+STATEMENT|JOINT\s+HOUSEHOLD\s+INCOME\s+DECLARATION", text, re.IGNORECASE):
@@ -387,6 +447,7 @@ def extract_income(text):
     return extract_standard_income(text)
 
 
+# what this function does for the service: Handles  extract applicants for this service.
 def _extract_applicants(text):
     """Parse applicant blocks from an HFE letter line by line."""
     applicants = []
@@ -451,6 +512,7 @@ def _extract_applicants(text):
     return applicants
 
 
+# what this function does for the service: Handles extract hfe for this service.
 def extract_hfe(text):
     return {
         "applicants": _extract_applicants(text),
@@ -473,6 +535,7 @@ def extract_hfe(text):
     }
 
 
+# what this function does for the service: Handles normalize income result for this service.
 def normalize_income_result(fields):
     variant = fields.get("document_variant")
     if variant == "joint_household_income_statement":
@@ -542,6 +605,7 @@ def normalize_income_result(fields):
     }
 
 
+# what this function does for the service: Handles normalize hfe result for this service.
 def normalize_hfe_result(fields):
     applicants = fields.get("applicants") or []
     main_applicant = applicants[0] if len(applicants) > 0 else {}
@@ -567,6 +631,7 @@ def normalize_hfe_result(fields):
     }
 
 
+# what this function does for the service: Handles  parse optional int for this service.
 def _parse_optional_int(raw_value, field_name):
     value = (raw_value or "").strip()
     if not value:
@@ -578,6 +643,7 @@ def _parse_optional_int(raw_value, field_name):
         return None, f"{field_name} must be an integer."
 
 
+# what this function does for the service: Handles  parse required int for this service.
 def _parse_required_int(raw_value, field_name):
     value = (raw_value or "").strip()
     if not value:
@@ -589,6 +655,7 @@ def _parse_required_int(raw_value, field_name):
         return None, f"{field_name} must be an integer."
 
 
+# what this function does for the service: Handles detect doc type for this service.
 def detect_doc_type(text):
     # Check income variants first so HDB-branded income letters are not
     # mistaken for HFE letters.
@@ -633,6 +700,7 @@ def detect_doc_type(text):
     return "unknown"
 
 
+# what this function does for the service: Handles process document upload for this service.
 def process_document_upload(uploaded_file, application_id):
     filename = uploaded_file.filename or "document.pdf"
     if not filename.lower().endswith(".pdf"):
@@ -687,6 +755,7 @@ def process_document_upload(uploaded_file, application_id):
     }, 200
 
 
+# what this function does for the service: Handles extract for this service.
 @app.route("/extract", methods=["POST"])
 def extract():
     """
@@ -779,6 +848,7 @@ def extract():
     return jsonify(payload), status_code
 
 
+# what this function does for the service: Handles list documents for this service.
 @app.route("/documents", methods=["GET"])
 def list_documents():
     """
@@ -835,6 +905,7 @@ def list_documents():
     return jsonify({"documents": [document.to_dict() for document in documents]})
 
 
+# what this function does for the service: Handles get document for this service.
 @app.route("/documents/<int:document_id>", methods=["GET"])
 def get_document(document_id):
     """
@@ -884,6 +955,7 @@ def get_document(document_id):
     return jsonify(row.to_dict())
 
 
+# what this function does for the service: Handles get document file for this service.
 @app.route("/documents/<int:document_id>/file", methods=["GET"])
 def get_document_file(document_id):
     """

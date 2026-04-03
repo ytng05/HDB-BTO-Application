@@ -165,7 +165,42 @@ Notes:
 
 ---
 
-## 7. Project Structure
+## 7. End-to-End Test Scenarios
+
+Generate the test PDFs:
+
+```bash
+python test_scenarios/generate_test_pdfs.py
+```
+
+The script writes 10 files (income + HFE for each scenario) into `test_scenarios/`.
+
+| Scenario | Applicants | Flat Type | Expected | Reason |
+|---|---|---|---|---|
+| 1 | Lena Ong + Sarah Lim | 2-Room Flexi | PASS | Valid HFE, co-applicant matches, income within ceiling |
+| 2 | Ryan Tan + Sarah Lim | 4-Room | PASS | Valid HFE, combined income within ceiling |
+| 3 | Daniel Goh + Marcus Lim | 3-Room | FAIL | Current income exceeds 3-Room ceiling |
+| 4 | Jasmine Tan + Marcus Lim | 4-Room | FAIL | HFE letter has expired |
+| 5 | Wendy Chen + Ryan Tan | 4-Room | FAIL | Selected flat type not in HFE-approved list |
+
+Generated files:
+
+- Scenario 1: `scenario_1_lena_ong_income.pdf`, `scenario_1_lena_ong_hfe.pdf`
+- Scenario 2: `scenario_2_ryan_sarah_income.pdf`, `scenario_2_ryan_sarah_hfe.pdf`
+- Scenario 3: `scenario_3_daniel_goh_income.pdf`, `scenario_3_daniel_goh_hfe.pdf`
+- Scenario 4: `scenario_4_jasmine_marcus_income.pdf`, `scenario_4_jasmine_marcus_hfe.pdf`
+- Scenario 5: `scenario_5_wendy_chen_income.pdf`, `scenario_5_wendy_chen_hfe.pdf`
+
+How to test in the app:
+
+1. Start backend services and frontend.
+2. Go to the application flow and upload the matching income + HFE pair for one scenario.
+3. Complete payment and proceed to eligibility.
+4. Verify the eligibility result matches the expected PASS/FAIL above.
+
+---
+
+## 8. Project Structure
 
 ```text
 esd-hdb/

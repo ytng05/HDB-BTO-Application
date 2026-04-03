@@ -58,3 +58,21 @@ export function mapMaritalStatus(code: string | undefined): string {
   }
   return map[code ?? ''] ?? ''
 }
+
+export function getCitizenshipStatusFromProfile(profile: MyInfoPersona): string {
+  const residentialStatus = profile.residentialstatus?.desc?.trim().toUpperCase()
+  if (residentialStatus?.includes('CITIZEN')) {
+    return 'Citizen'
+  }
+
+  if (residentialStatus === 'PR' || residentialStatus?.includes('PERMANENT RESIDENT')) {
+    return 'PR'
+  }
+
+  const nationality = profile.nationality?.desc?.trim().toUpperCase()
+  if (nationality?.includes('SINGAPORE')) {
+    return 'Citizen'
+  }
+
+  return 'Foreigner'
+}

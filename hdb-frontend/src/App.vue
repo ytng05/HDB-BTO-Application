@@ -12,7 +12,7 @@ onMounted(() => {
   restoreSession()
 
   if (applicantNric.value) {
-    void applicationStore.loadLinkedApplications(applicantNric.value)
+    applicationStore.syncSessionApplications(applicantNric.value)
   }
 })
 </script>

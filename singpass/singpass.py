@@ -1,4 +1,4 @@
-"""Singpass and MyInfo mock service backed by the local v3.json dataset."""
+﻿"""Singpass and MyInfo mock service backed by the local v3.json dataset."""
 
 import json
 import os
@@ -22,6 +22,7 @@ app.config["SWAGGER"] = {
 swagger = Swagger(app)
 
 
+#  Handles load personas for this service.
 def load_personas():
     with DATA_PATH.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
@@ -31,10 +32,12 @@ def load_personas():
 PERSONAS = load_personas()
 
 
+#  Handles get persona for this service.
 def get_persona(nric):
     return PERSONAS.get(nric.strip().upper())
 
 
+#  Handles singpass login for this service.
 @app.route("/singpass/login", methods=["POST"])
 def singpass_login():
     """
@@ -84,6 +87,7 @@ def singpass_login():
     )
 
 
+#  Handles get profile for this service.
 @app.route("/singpass/profile", methods=["GET"])
 def get_profile():
     """

@@ -10,19 +10,10 @@ CREATE TABLE IF NOT EXISTS application (
     main_applicant_nric VARCHAR(20) NOT NULL,
     income_document_id INT DEFAULT NULL,
     hfe_document_id INT DEFAULT NULL,
-    draft_payload JSON DEFAULT NULL,
-    application_status ENUM('DRAFT', 'SUBMITTED', 'SUCCESSFUL', 'UNSUCCESSFUL', 'CANCELLED') NOT NULL DEFAULT 'SUBMITTED',
-    active_main_applicant_nric VARCHAR(20)
-        GENERATED ALWAYS AS (
-            CASE
-                WHEN application_status IN ('DRAFT', 'SUBMITTED') THEN main_applicant_nric
-                ELSE NULL
-            END
-        ) STORED,
+    application_status ENUM('SUBMITTED', 'SUCCESSFUL', 'UNSUCCESSFUL', 'CANCELLED') NOT NULL DEFAULT 'SUBMITTED',
     submitted_at DATETIME DEFAULT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_active_main_applicant_nric (active_main_applicant_nric)
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS application_member (
@@ -35,14 +26,80 @@ CREATE TABLE IF NOT EXISTS application_member (
     date_of_birth DATE NOT NULL,
     citizenship_status VARCHAR(20) NOT NULL,
     marital_status VARCHAR(20) DEFAULT NULL,
-    is_pregnant BOOLEAN NOT NULL DEFAULT FALSE,
+    contact_number VARCHAR(30) DEFAULT NULL,
+    email VARCHAR(255) DEFAULT NULL,
     income_amount DECIMAL(12,2) DEFAULT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (application_id) REFERENCES application(application_id) ON DELETE CASCADE
 );
 
--- Sample records
+SET @add_application_member_contact_number = (
+    SELECT IF(
+        EXISTS(
+            SELECT 1
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'application_member'
+              AND COLUMN_NAME = 'contact_number'
+        ),
+        'SELECT 1',
+        'ALTER TABLE application_member ADD COLUMN contact_number VARCHAR(30) DEFAULT NULL AFTER marital_status'
+    )
+);
+PREPARE stmt FROM @add_application_member_contact_number;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_application_member_email = (
+    SELECT IF(
+        EXISTS(
+            SELECT 1
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'application_member'
+              AND COLUMN_NAME = 'email'
+        ),
+        'SELECT 1',
+        'ALTER TABLE application_member ADD COLUMN email VARCHAR(255) DEFAULT NULL AFTER contact_number'
+    )
+);
+PREPARE stmt FROM @add_application_member_email;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @drop_application_member_is_pregnant = (
+    SELECT IF(
+        EXISTS(
+            SELECT 1
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'application_member'
+              AND COLUMN_NAME = 'is_pregnant'
+        ),
+        'ALTER TABLE application_member DROP COLUMN is_pregnant',
+        'SELECT 1'
+    )
+);
+PREPARE stmt FROM @drop_application_member_is_pregnant;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- -----------------------------------------------------------------------
+-- Three demo applications aligned to the dummy variable PDF personas.
+--
+-- App 2001 — Kevin Tan + Elaine Koh applying for 5-Room (SUBMITTED).
+--            Happy path: married couple, valid HFE, income within ceiling.
+--            Documents: income doc 1 (joint), HFE doc 2 (Kevin+Elaine).
+--
+-- App 2002 — Aaron Tan applying for 3-Room (SUBMITTED).
+--            Single applicant, valid HFE, eligible for 3-Room only.
+--            Documents: income doc 3 (Aaron CPF), HFE doc 4 (Aaron).
+--
+-- App 2003 — Sam Yee applying for 5-Room (UNSUCCESSFUL).
+--            Failing path: HFE letter expired in September 2020.
+--            Documents: income doc 5 (Sam CPF), HFE doc 6 (Sam).
+-- -----------------------------------------------------------------------
 INSERT INTO application (
     application_id,
     exercise_id,
@@ -51,7 +108,6 @@ INSERT INTO application (
     main_applicant_nric,
     income_document_id,
     hfe_document_id,
-    draft_payload,
     application_status,
     submitted_at,
     created_at,
@@ -61,39 +117,36 @@ INSERT INTO application (
     2001,
     202601,
     51,
-    '4-Room',
-    'S9812381D',
+    '5-Room',
+    'S9701234K',
     1,
     2,
-    '{"form":{"fullName":"TAN HENG HUAT","nric":"S9812381D","dateOfBirth":"1998-06-06","contactNumber":"97399245","email":"myinfotesting@gmail.com","maritalStatus":"Married","preferredTown":"Queenstown","flatType":"4-Room"},"documents":{"incomePdfName":"income_doc_tan_heng_huat.pdf","hfeLetterPdfName":"hfe_tan_heng_huat.pdf"},"saved_step":"payment","saved_at":"2026-03-31T08:40:00"}',
-    'DRAFT',
-    NULL,
-    '2026-03-30 09:15:00',
-    '2026-03-31 08:40:00'
+    'SUBMITTED',
+    '2026-03-15 10:00:00',
+    '2026-03-15 09:45:00',
+    '2026-03-15 10:00:00'
 ),
 (
     2002,
-    202511,
-    52,
+    202601,
+    21,
     '3-Room',
-    'S9912375C',
+    'S8501234A',
     3,
     4,
-    '{"form":{"fullName":"BERNARD WONG","nric":"S9912375C","dateOfBirth":"1948-09-10","contactNumber":"81234567","email":"bernard.wong@example.com","maritalStatus":"Single","preferredTown":"Kallang/Whampoa","flatType":"3-Room"},"documents":{"incomePdfName":"income_doc_bernard_wong.pdf","hfeLetterPdfName":"hfe_bernard_wong.pdf"},"saved_step":"submitted","saved_at":"2026-02-14T10:20:00"}',
     'SUBMITTED',
-    '2026-02-14 10:20:00',
-    '2026-02-14 10:18:00',
-    '2026-02-14 10:20:00'
+    '2026-03-20 14:30:00',
+    '2026-03-20 14:15:00',
+    '2026-03-20 14:30:00'
 ),
 (
     2003,
     202510,
-    21,
+    32,
     '5-Room',
     'S9812346F',
     5,
     6,
-    '{"form":{"fullName":"SAM YEE","nric":"S9812346F","dateOfBirth":"1989-12-06","contactNumber":"92345678","email":"sam.yee@example.com","maritalStatus":"Married","preferredTown":"Punggol","flatType":"5-Room"},"documents":{"incomePdfName":"income_doc_sam_yee.pdf","hfeLetterPdfName":"hfe_sam_yee.pdf"},"saved_step":"submitted","saved_at":"2025-11-18T14:05:00"}',
     'UNSUCCESSFUL',
     '2025-11-18 14:05:00',
     '2025-11-18 13:40:00',
@@ -110,73 +163,65 @@ INSERT INTO application_member (
     date_of_birth,
     citizenship_status,
     marital_status,
-    is_pregnant,
+    contact_number,
+    email,
     income_amount,
     created_at,
     updated_at
 ) VALUES
+-- App 2001: Kevin + Elaine
 (
     3001,
     2001,
     'MAIN_APPLICANT',
-    'S9812381D',
-    'TAN HENG HUAT',
+    'S9701234K',
+    'KEVIN TAN WEI JIAN',
     'Self',
-    '1998-06-06',
+    '1997-10-08',
     'Citizen',
     'Married',
-    FALSE,
-    4999.00,
-    '2026-03-30 09:15:00',
-    '2026-03-31 08:40:00'
+    '+65 9123 4567',
+    'kevin.tan@example.com',
+    5491.67,
+    '2026-03-15 09:45:00',
+    '2026-03-15 10:00:00'
 ),
 (
     3002,
     2001,
     'CO_APPLICANT',
-    'S9812382B',
-    'FREYA LIM GUO EN',
+    'S8805678E',
+    'ELAINE KOH MEI LING',
     'Spouse',
-    '1960-04-19',
-    'Foreigner',
+    '1988-09-30',
+    'Citizen',
     'Married',
-    FALSE,
-    3999.00,
-    '2026-03-30 09:15:00',
-    '2026-03-31 08:40:00'
+    '+65 9234 5678',
+    'elaine.koh@example.com',
+    4929.17,
+    '2026-03-15 09:45:00',
+    '2026-03-15 10:00:00'
 ),
+-- App 2002: Aaron Tan (solo)
 (
     3003,
     2002,
     'MAIN_APPLICANT',
-    'S9912375C',
-    'BERNARD WONG',
+    'S8501234A',
+    'AARON TAN WEI MING',
     'Self',
-    '1948-09-10',
+    '1985-04-12',
     'Citizen',
     'Single',
-    FALSE,
-    0.00,
-    '2026-02-14 10:18:00',
-    '2026-02-14 10:20:00'
+    '+65 9345 6789',
+    'aaron.tan@example.com',
+    7233.33,
+    '2026-03-20 14:15:00',
+    '2026-03-20 14:30:00'
 ),
+-- App 2003: Sam Yee (solo — expired HFE)
 (
     3004,
-    2002,
-    'CO_APPLICANT',
-    'S9912365F',
-    'CHENG MEI QIN',
-    'Sister',
-    '1961-06-17',
-    'Citizen',
-    'Single',
-    FALSE,
-    0.00,
-    '2026-02-14 10:18:00',
-    '2026-02-14 10:20:00'
-),
-(
-    3005,
     2003,
     'MAIN_APPLICANT',
     'S9812346F',
@@ -185,8 +230,9 @@ INSERT INTO application_member (
     '1989-12-06',
     'Citizen',
     'Married',
-    FALSE,
-    0.00,
+    '+65 9456 7890',
+    'sam.yee@example.com',
+    2673.70,
     '2025-11-18 13:40:00',
     '2025-12-02 09:10:00'
 );

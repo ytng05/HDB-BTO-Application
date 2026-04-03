@@ -1,4 +1,4 @@
-"""NETS hosted-payment wrapper used by the local HDB demo app."""
+﻿"""NETS hosted-payment wrapper used by the local HDB demo app."""
 
 from flask import Flask, request, jsonify, redirect
 from flask_cors import CORS
@@ -56,11 +56,13 @@ ENETS_QUERY_URLS = {
 payment_records = {}
 
 
+#  Handles get enets url for this service.
 def get_enets_url():
     """Get the eNETS gateway URL based on environment."""
     return ENETS_URLS.get(NETS_ENVIRONMENT, ENETS_URLS['uat'])
 
 
+#  Handles get enets query url for this service.
 def get_enets_query_url():
     """Get the eNETS query URL based on environment."""
     if NETS_QUERY_URL:
@@ -68,16 +70,19 @@ def get_enets_query_url():
     return ENETS_QUERY_URLS.get(NETS_ENVIRONMENT, ENETS_QUERY_URLS['uat'])
 
 
+#  Handles get b2s callback url for this service.
 def get_b2s_callback_url():
     """Get the browser callback URL used in the hosted payment request."""
     return NETS_B2S_CALLBACK_URL or f"{NETS_CALLBACK_BASE}/payment/b2s-callback"
 
 
+#  Handles get s2s callback url for this service.
 def get_s2s_callback_url():
     """Get the server callback URL used in the hosted payment request."""
     return NETS_S2S_CALLBACK_URL or f"{NETS_CALLBACK_BASE}/payment/s2s-callback"
 
 
+#  Handles get request client ip for this service.
 def get_request_client_ip():
     """
     Best-effort client IP for the hosted payment payload.
@@ -107,6 +112,7 @@ def get_request_client_ip():
     return client_ip or '127.0.0.1'
 
 
+#  Handles get query mid for this service.
 def get_query_mid():
     """
     NETS' transaction query API expects the numeric MID.
@@ -119,6 +125,7 @@ def get_query_mid():
     return NETS_MID
 
 
+#  Handles generate merchant txn ref for this service.
 def generate_merchant_txn_ref():
     """Generate a unique merchant transaction reference (max 20 chars)."""
     timestamp = datetime.now().strftime('%y%m%d%H%M%S')
@@ -126,6 +133,7 @@ def generate_merchant_txn_ref():
     return f"HDB{timestamp}{suffix}"[:20]
 
 
+#  Handles compute hmac for this service.
 def compute_hmac(payload_json, secret_key):
     """
     eNETS expects a Base64-encoded SHA-256 digest of payload + secret key.
@@ -137,6 +145,7 @@ def compute_hmac(payload_json, secret_key):
     return base64.b64encode(digest).decode('utf-8')
 
 
+#  Handles build txn req for this service.
 def build_txn_req(amount_cents, merchant_txn_ref, description, currency='SGD', client_ip='127.0.0.1'):
     """Build the hosted-payment request payload expected by NETS."""
     now = datetime.now()
@@ -176,6 +185,7 @@ def build_txn_req(amount_cents, merchant_txn_ref, description, currency='SGD', c
     }
 
 
+#  Handles parse structured payload for this service.
 def parse_structured_payload(payload):
     """Parse JSON or form-encoded callback payloads into a dictionary."""
     if isinstance(payload, dict):
@@ -213,6 +223,7 @@ def parse_structured_payload(payload):
     return None
 
 
+#  Handles unwrap callback message for this service.
 def unwrap_callback_message(payload):
     """
     Recursively unwrap common NETS callback wrappers until we reach the
@@ -231,6 +242,7 @@ def unwrap_callback_message(payload):
     return structured
 
 
+#  Handles get callback payload for this service.
 def get_callback_payload():
     """Read callback data from GET params, JSON, or form-encoded POSTs."""
     if request.method == 'GET':
@@ -252,6 +264,7 @@ def get_callback_payload():
     return unwrap_callback_message(raw_data) or parse_structured_payload(raw_data) or {}
 
 
+#  Handles extract merchant txn ref for this service.
 def extract_merchant_txn_ref(payload):
     """Best-effort extraction of merchantTxnRef from nested callback payloads."""
     structured = unwrap_callback_message(payload) or parse_structured_payload(payload)
@@ -272,6 +285,7 @@ def extract_merchant_txn_ref(payload):
     return ''
 
 
+#  Handles parse txn end for this service.
 def parse_txn_end(txn_end_data):
     """
     Parse the TxnEnd response from eNETS (both b2s and s2s callbacks).
@@ -319,6 +333,7 @@ def parse_txn_end(txn_end_data):
     return txn_end if has_core_fields else None
 
 
+#  Handles map nets status for this service.
 def map_nets_status(nets_txn_status):
     """Map NETS status codes to the local record status."""
     return {
@@ -328,6 +343,7 @@ def map_nets_status(nets_txn_status):
     }.get(nets_txn_status, 'unknown')
 
 
+#  Handles apply txn end to record for this service.
 def apply_txn_end_to_record(record, txn_end, source):
     """Update a payment record from a parsed NETS transaction payload."""
     record['status'] = map_nets_status(txn_end['netsTxnStatus'])
@@ -342,6 +358,7 @@ def apply_txn_end_to_record(record, txn_end, source):
     record['updated_at'] = datetime.now().isoformat()
 
 
+#  Handles mark record abandoned for this service.
 def mark_record_abandoned(record):
     """Treat an unfinished hosted payment as cancelled after a manual return."""
     if record['status'] != 'pending':
@@ -358,6 +375,7 @@ def mark_record_abandoned(record):
     record['updated_at'] = datetime.now().isoformat()
 
 
+#  Handles interpret query status for this service.
 def interpret_query_status(raw_status):
     """
     Interpret the plain-text status returned by NETS' transaction query API.
@@ -396,6 +414,7 @@ def interpret_query_status(raw_status):
     }
 
 
+#  Handles query enets transaction for this service.
 def query_enets_transaction(merchant_txn_ref, nets_txn_ref=None):
     """
     Query NETS directly for the latest transaction state.
@@ -434,6 +453,7 @@ def query_enets_transaction(merchant_txn_ref, nets_txn_ref=None):
     }
 
 
+#  Handles refresh record from query for this service.
 def refresh_record_from_query(record):
     """Refresh a local payment record using NETS' transaction query API."""
     merchant_txn_ref = record['merchant_txn_ref']
@@ -455,6 +475,7 @@ def refresh_record_from_query(record):
     return query_result
 
 
+#  Handles initiate payment for this service.
 @app.route('/payment/initiate', methods=['POST'])
 def initiate_payment():
     """
@@ -574,6 +595,7 @@ def initiate_payment():
         }), 500
 
 
+#  Handles s2s callback for this service.
 @app.route('/payment/s2s-callback', methods=['POST'])
 def s2s_callback():
     """
@@ -640,6 +662,7 @@ def s2s_callback():
         return "ERROR", 500
 
 
+#  Handles b2s callback for this service.
 @app.route('/payment/b2s-callback', methods=['POST', 'GET'])
 def b2s_callback():
     """
@@ -729,6 +752,7 @@ def b2s_callback():
         return redirect(f"{portal_url}/payment-result?status=error", code=302)
 
 
+#  Handles check payment status for this service.
 @app.route('/payment/status/<merchant_txn_ref>', methods=['GET'])
 def check_payment_status(merchant_txn_ref):
     """
@@ -856,6 +880,7 @@ def check_payment_status(merchant_txn_ref):
         }), 202
 
 
+#  Handles abandon payment for this service.
 @app.route('/payment/abandon/<merchant_txn_ref>', methods=['POST'])
 def abandon_payment(merchant_txn_ref):
     """

@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { Building2, Clock3, FileText, FolderClock, MapPinned, UserRound } from 'lucide-vue-next'
+import { Building2, Clock3, FileText, MapPinned, UserRound } from 'lucide-vue-next'
 import HeroCarousel from '@/components/HeroCarousel.vue'
 import BtoProjectCard from '@/components/BtoProjectCard.vue'
 import ApplicationStatusStepper from '@/components/ApplicationStatusStepper.vue'
 import { getProjectName, getProjectTown, heroSlides, upcomingProjects } from '@/data/projects'
 import { useApplicationStore } from '@/stores/application'
 import { useAuth } from '@/stores/auth'
-import type { ApplicationRecord, ApplicationMemberRecord } from '@/services/api'
+import type { ApplicationMemberRecord, ApplicationRecord } from '@/services/api'
 
 const router = useRouter()
 const applicationStore = useApplicationStore()
@@ -18,35 +18,24 @@ const currentNric = computed(() => applicantNric.value ?? applicationStore.form.
 const dashboardName = computed(
   () => (applicantName.value ?? applicationStore.form.fullName) || 'Prospective Applicant',
 )
-const draftApplications = computed(() => applicationStore.draftApplications)
-const pastApplications = computed(() => applicationStore.pastApplications)
+const applications = computed(() => applicationStore.linkedApplications)
+const submittedApplications = computed(() => applicationStore.submittedApplications)
 const latestApplication = computed(() => applicationStore.latestApplication)
-const firstDraft = computed(() => applicationStore.firstDraft)
 const firstSubmitted = computed(() => applicationStore.firstSubmitted)
 const latestProjectName = computed(() =>
   latestApplication.value ? getProjectName(latestApplication.value.project_id) : 'No applications yet',
 )
 const showLocalWorkflow = computed(
-  () => !applicationStore.hasExistingApplications && applicationStore.hasSubmitted,
+  () => !applicationStore.hasExistingApplications && applicationStore.status !== 'editing',
 )
 
 const dashboardTitle = computed(() => {
-  if (applicationStore.isLoadingLinkedApplications) {
-    return 'Loading your linked applications'
-  }
-
-  if (draftApplications.value.length > 0) {
-    return draftApplications.value.length === 1
-      ? 'You have 1 draft application on file'
-      : `You have ${draftApplications.value.length} draft applications on file`
-  }
-
   if (firstSubmitted.value) {
-    return 'You already have a submitted application on file'
+    return 'You already have an active application on file'
   }
 
-  if (pastApplications.value.length > 0) {
-    return 'Your previous applications are available below'
+  if (applications.value.length > 0) {
+    return 'Your saved application history is available below'
   }
 
   if (showLocalWorkflow.value) {
@@ -63,24 +52,16 @@ const dashboardTitle = computed(() => {
     }
   }
 
-  return 'No application history found for this NRIC'
+  return 'No saved application history found for this NRIC'
 })
 
 const dashboardText = computed(() => {
-  if (applicationStore.isLoadingLinkedApplications) {
-    return 'We are checking the applications linked to your NRIC now.'
-  }
-
-  if (draftApplications.value.length > 0) {
-    return 'Draft applications are shown first so you can quickly see anything still in progress.'
-  }
-
   if (firstSubmitted.value) {
-    return 'Open your submitted application to review or update it. A second submission is not allowed while it is still active.'
+    return 'Open your saved submitted application to review the stored details. A second submission is not allowed while it is still active.'
   }
 
-  if (pastApplications.value.length > 0) {
-    return 'Every linked application appears here whether you joined as the main applicant or a co-applicant.'
+  if (applications.value.length > 0) {
+    return 'Applications saved on this device for the signed-in NRIC appear here, including any household roles returned by Apply BTO.'
   }
 
   if (showLocalWorkflow.value) {
@@ -106,40 +87,6 @@ function formatStatus(status: ApplicationRecord['application_status']) {
     .split('_')
     .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
     .join(' ')
-}
-
-function getProjectLabel(application: ApplicationRecord) {
-  if (application.project_id > 0) {
-    return getProjectName(application.project_id)
-  }
-
-  const payload = application.draft_payload
-  if (payload && typeof payload === 'object') {
-    const form = payload.form as Record<string, unknown> | undefined
-    const preferredTown = typeof form?.preferredTown === 'string' ? form.preferredTown : ''
-    if (preferredTown) {
-      return `${preferredTown} Draft`
-    }
-  }
-
-  return `Draft #${application.application_id}`
-}
-
-function getProjectTownLabel(application: ApplicationRecord) {
-  if (application.project_id > 0) {
-    return getProjectTown(application.project_id)
-  }
-
-  const payload = application.draft_payload
-  if (payload && typeof payload === 'object') {
-    const form = payload.form as Record<string, unknown> | undefined
-    const preferredTown = typeof form?.preferredTown === 'string' ? form.preferredTown : ''
-    if (preferredTown) {
-      return preferredTown
-    }
-  }
-
-  return 'Town not selected'
 }
 
 function formatDate(value: string | null) {
@@ -190,34 +137,27 @@ function formatMemberRole(member: ApplicationMemberRecord) {
 }
 
 function startApplicationFlow() {
-  if (firstDraft.value) {
-    applicationStore.openDraft(firstDraft.value)
-    router.push('/apply/details')
-    return
-  }
-
   if (firstSubmitted.value) {
-    applicationStore.openDraft(firstSubmitted.value)
-    router.push('/apply/review')
+    applicationStore.openApplication(firstSubmitted.value)
+    void router.push('/apply/review')
     return
   }
 
-  if (applicationStore.hasSubmitted && !applicationStore.hasExistingApplications) {
-    router.push('/apply/review')
+  if (showLocalWorkflow.value) {
+    void router.push('/apply/review')
     return
   }
 
-  router.push('/apply/details')
-}
+  if (applicationStore.currentApplication) {
+    applicationStore.beginNewApplication()
+  }
 
-function openDraft(application: ApplicationRecord) {
-  applicationStore.openDraft(application)
-  router.push('/apply/details')
+  void router.push('/apply/details')
 }
 
 function openApplication(application: ApplicationRecord) {
-  applicationStore.openDraft(application)
-  router.push(application.application_status === 'DRAFT' ? '/apply/details' : '/apply/review')
+  applicationStore.openApplication(application)
+  void router.push('/apply/review')
 }
 
 function revealMockBallot() {
@@ -232,7 +172,7 @@ function revealMockBallot() {
         <HeroCarousel :slides="heroSlides" />
 
         <div class="hero-actions">
-          <p class="hero-login-hint">Sign in with your NRIC to see any draft or past applications linked to you.</p>
+          <p class="hero-login-hint">Sign in with your NRIC to continue or review the application saved on this device.</p>
         </div>
       </div>
     </section>
@@ -244,7 +184,7 @@ function revealMockBallot() {
             <p class="eyebrow">Applicant Dashboard</p>
             <h2 class="section-heading">Application status and next steps</h2>
             <p class="section-subtitle">
-              Your dashboard now pulls applications directly from the application service using your NRIC.
+              This dashboard shows the application state currently saved in the portal for the signed-in NRIC.
             </p>
           </div>
         </div>
@@ -260,18 +200,18 @@ function revealMockBallot() {
 
           <div class="surface detail-card dashboard-card">
             <div class="dashboard-card__label">
-              <FolderClock :size="18" />
-              <span>Drafts</span>
+              <Clock3 :size="18" />
+              <span>Active Applications</span>
             </div>
-            <p class="dashboard-card__value">{{ draftApplications.length }}</p>
+            <p class="dashboard-card__value">{{ submittedApplications.length }}</p>
           </div>
 
           <div class="surface detail-card dashboard-card">
             <div class="dashboard-card__label">
-              <Clock3 :size="18" />
-              <span>Past Applications</span>
+              <FileText :size="18" />
+              <span>Saved Applications</span>
             </div>
-            <p class="dashboard-card__value">{{ pastApplications.length }}</p>
+            <p class="dashboard-card__value">{{ applications.length }}</p>
           </div>
 
           <div class="surface detail-card dashboard-card">
@@ -291,20 +231,14 @@ function revealMockBallot() {
             </div>
             <button class="btn btn-primary dashboard-summary__button" type="button" @click="startApplicationFlow">
               {{
-                firstDraft
-                  ? 'Continue Draft'
-                  : firstSubmitted
-                    ? 'View Submitted Application'
-                    : applicationStore.hasSubmitted
-                      ? 'Review Application'
-                      : 'Start Application'
+                firstSubmitted
+                  ? 'View Active Application'
+                  : showLocalWorkflow
+                    ? 'Review Application'
+                    : 'Start Application'
               }}
             </button>
           </div>
-
-          <p v-if="applicationStore.linkedApplicationsError" class="dashboard-error">
-            {{ applicationStore.linkedApplicationsError }}
-          </p>
 
           <ApplicationStatusStepper
             v-if="showLocalWorkflow"
@@ -327,61 +261,15 @@ function revealMockBallot() {
           </div>
         </div>
 
-        <div v-if="draftApplications.length > 0" class="dashboard-list">
+        <div v-if="applications.length > 0" class="dashboard-list">
           <div class="dashboard-list__header">
-            <h3>Draft Applications</h3>
-            <p>Applications still in progress.</p>
+            <h3>Saved Applications</h3>
+            <p>Applications saved in this browser for the signed-in NRIC appear here after Apply BTO completes.</p>
           </div>
 
           <div class="application-grid">
             <article
-              v-for="application in draftApplications"
-              :key="application.application_id"
-              class="surface application-card application-card--draft"
-            >
-              <div class="application-card__header">
-                <div>
-                  <p class="application-card__eyebrow">Application #{{ application.application_id }}</p>
-                  <h4>{{ getProjectLabel(application) }}</h4>
-                </div>
-                <span class="status-chip status-chip--draft">{{ formatStatus(application.application_status) }}</span>
-              </div>
-
-              <div class="application-card__meta">
-                <p>
-                  <MapPinned :size="16" />
-                  <span>{{ getProjectTownLabel(application) }}</span>
-                </p>
-                <p>
-                  <Building2 :size="16" />
-                  <span>{{ application.flat_type }}</span>
-                </p>
-                <p>
-                  <UserRound :size="16" />
-                  <span>{{ getLinkedRoles(application) }}</span>
-                </p>
-              </div>
-
-              <p class="application-card__date">
-                Last updated {{ formatDate(application.updated_at) }}
-              </p>
-
-              <div class="application-card__actions">
-                <button class="btn btn-primary" type="button" @click="openDraft(application)">Open Draft</button>
-              </div>
-            </article>
-          </div>
-        </div>
-
-        <div v-if="pastApplications.length > 0" class="dashboard-list">
-          <div class="dashboard-list__header">
-            <h3>Past Applications</h3>
-            <p>Submitted, cancelled, or decided applications linked to your NRIC.</p>
-          </div>
-
-          <div class="application-grid">
-            <article
-              v-for="application in pastApplications"
+              v-for="application in applications"
               :key="application.application_id"
               class="surface application-card"
             >
@@ -414,7 +302,7 @@ function revealMockBallot() {
 
               <div class="application-card__actions">
                 <button class="btn btn-secondary" type="button" @click="openApplication(application)">
-                  {{ application.application_status === 'SUBMITTED' ? 'View / Update' : 'View Application' }}
+                  {{ application.application_status === 'SUBMITTED' ? 'View Active Application' : 'View Application' }}
                 </button>
               </div>
             </article>
@@ -423,15 +311,14 @@ function revealMockBallot() {
 
         <div
           v-if="
-            !applicationStore.isLoadingLinkedApplications &&
             !applicationStore.hasExistingApplications &&
             !showLocalWorkflow
           "
           class="surface empty-state"
         >
-          <h3>No linked applications yet</h3>
+          <h3>No saved applications yet</h3>
           <p>
-            We did not find any draft or past applications for this NRIC. You can start a fresh application from here.
+            There are no applications saved locally for this NRIC yet. You can start a fresh application from here.
           </p>
         </div>
       </div>
@@ -587,11 +474,6 @@ function revealMockBallot() {
   padding: 22px;
 }
 
-.application-card--draft {
-  border: 1px solid rgba(200, 16, 46, 0.16);
-  background: linear-gradient(180deg, rgba(200, 16, 46, 0.03), rgba(255, 255, 255, 0.98));
-}
-
 .application-card__header {
   display: flex;
   align-items: flex-start;
@@ -650,11 +532,6 @@ function revealMockBallot() {
   font-size: 0.8rem;
   font-weight: 700;
   white-space: nowrap;
-}
-
-.status-chip--draft {
-  background: rgba(200, 16, 46, 0.1);
-  color: var(--color-red);
 }
 
 .empty-state {

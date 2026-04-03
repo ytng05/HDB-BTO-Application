@@ -8,6 +8,7 @@ const props = withDefaults(
     title: string
     message: string
     eyebrow?: string
+    size?: 'default' | 'wide'
     processing?: boolean
     confirmLabel?: string
     cancelLabel?: string
@@ -15,6 +16,7 @@ const props = withDefaults(
   }>(),
   {
     eyebrow: 'Please Confirm',
+    size: 'default',
     processing: false,
     confirmLabel: 'Confirm',
     cancelLabel: 'Cancel',
@@ -69,11 +71,19 @@ onBeforeUnmount(() => {
   <Teleport to="body">
     <Transition name="modal-fade">
       <div v-if="open" class="modal-overlay" @click.self="!processing && emit('close')">
-        <div class="surface modal-panel" role="dialog" aria-modal="true" aria-labelledby="selection-modal-title">
+        <div
+          :class="['surface modal-panel', { 'modal-panel--wide': size === 'wide' }]"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="selection-modal-title"
+        >
           <div class="modal-copy">
             <p class="eyebrow">{{ eyebrow }}</p>
             <h2 id="selection-modal-title">{{ title }}</h2>
             <p class="modal-description">{{ message }}</p>
+            <div v-if="$slots.default" class="modal-extra">
+              <slot />
+            </div>
           </div>
 
           <div v-if="processing" class="modal-loading">
@@ -103,24 +113,42 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(29, 29, 31, 0.36);
+  background: rgba(29, 29, 31, 0.42);
+  backdrop-filter: blur(8px);
 }
 
 .modal-panel {
   width: min(100%, 560px);
-  padding: 28px;
+  max-height: min(88vh, 900px);
+  padding: 30px;
+  overflow: auto;
+  box-shadow: 0 30px 80px rgba(29, 29, 31, 0.22);
+}
+
+.modal-panel--wide {
+  width: min(100%, 920px);
+}
+
+.modal-copy {
+  display: grid;
+  gap: 12px;
 }
 
 .modal-copy h2 {
-  margin: 0 0 14px;
+  margin: 0;
   font-size: 1.7rem;
   line-height: 1.1;
   letter-spacing: -0.03em;
 }
 
 .modal-description {
-  margin: 0 0 12px;
+  margin: 0;
   color: rgba(29, 29, 31, 0.78);
+  line-height: 1.6;
+}
+
+.modal-extra {
+  margin-top: 8px;
 }
 
 .modal-loading {
@@ -132,6 +160,8 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   gap: 12px;
   margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(29, 29, 31, 0.08);
 }
 
 .modal-fade-enter-active,

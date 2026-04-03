@@ -3,7 +3,6 @@ import HomeView from '@/views/HomeView.vue'
 import ApplyLayout from '@/views/ApplyLayout.vue'
 import FlatSelectionView from '@/views/FlatSelectionView.vue'
 import ApplyDetailsView from '@/views/apply/ApplyDetailsView.vue'
-import ApplyDocumentsView from '@/views/apply/ApplyDocumentsView.vue'
 import ApplyPaymentView from '@/views/apply/ApplyPaymentView.vue'
 import ApplyReviewView from '@/views/apply/ApplyReviewView.vue'
 import PaymentResultView from '@/views/PaymentResultView.vue'
@@ -57,19 +56,14 @@ const router = createRouter({
         },
         {
           path: 'documents',
-          name: 'apply-documents',
-          component: ApplyDocumentsView,
-          meta: {
-            applyStepIndex: 1,
-            requiresAuth: true,
-          },
+          redirect: '/apply/details',
         },
         {
           path: 'payment',
           name: 'apply-payment',
           component: ApplyPaymentView,
           meta: {
-            applyStepIndex: 2,
+            applyStepIndex: 1,
             requiresAuth: true,
           },
         },

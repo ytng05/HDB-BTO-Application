@@ -11,11 +11,11 @@ const applicationStore = useApplicationStore()
 const { applicantName, isLoggedIn, login, logout, setSessionNric } = useAuth()
 
 const demoAccounts = [
-  'S9812381D',
-  'S9812382B',
-  'S9912375C',
-  'S9912365F',
-  'S9812346F',
+  { nric: 'S9401234L', label: 'Lena Ong' },
+  { nric: 'S9501234R', label: 'Ryan Tan' },
+  { nric: 'S8901234D', label: 'Daniel Goh' },
+  { nric: 'S9001234J', label: 'Jasmine Tan' },
+  { nric: 'S9201234W', label: 'Wendy Chen' },
 ]
 
 const showModal = ref(false)
@@ -51,7 +51,7 @@ async function handleLogin() {
     applicationStore.startApplicationLogin(formattedNric, name)
     login(id, name, formattedNric)
     setSessionNric(formattedNric)
-    await applicationStore.loadLinkedApplications(formattedNric)
+    applicationStore.syncSessionApplications(formattedNric)
     closeModal()
   } catch {
     loginError.value = 'Login failed. Please try again.'
@@ -143,15 +143,15 @@ function handleLogout() {
         <p class="modal-copy">Enter your NRIC to access the portal.</p>
 
         <div class="demo-hint">
-          <strong>Demo NRICs:</strong>
+          <strong>Scenario Accounts:</strong>
           <button
             v-for="account in demoAccounts"
-            :key="account"
+            :key="account.nric"
             type="button"
             class="demo-pill"
-            @click="nric = account"
+            @click="nric = account.nric"
           >
-            {{ account }}
+            {{ account.label }} · {{ account.nric }}
           </button>
         </div>
 

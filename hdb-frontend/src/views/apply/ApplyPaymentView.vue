@@ -1,21 +1,22 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { CreditCard, ShieldCheck, AlertCircle } from 'lucide-vue-next'
+import { AlertCircle, CreditCard, ShieldCheck } from 'lucide-vue-next'
 import { useApplicationStore } from '@/stores/application'
-import { useAuth } from '@/stores/auth'
-import { abandonPayment, getErrorMessage, getPaymentStatus } from '@/services/api'
+import {
+  getErrorMessage,
+  initiateApplyBtoSubmission,
+} from '@/services/api'
 
 const router = useRouter()
 const applicationStore = useApplicationStore()
-const { applicantName } = useAuth()
 
-const NETS_SERVICE_URL = import.meta.env.VITE_NETS_URL ?? 'http://localhost:5003'
 const APPLICATION_FEE = 10
 const NETS_PAYMENT_REF_KEY = 'nets_last_merchant_txn_ref'
 const NETS_ACTIVE_PAYMENT_REF_KEY = 'nets_active_merchant_txn_ref'
+const householdMemberCount = computed(() => applicationStore.householdMemberCount)
 
-const paymentStep = ref<'idle' | 'initiating' | 'redirecting' | 'checking' | 'error'>('idle')
+const paymentStep = ref<'idle' | 'initiating' | 'redirecting' | 'error'>('idle')
 const paymentError = ref('')
 const isRecoveringPayment = ref(false)
 
@@ -52,38 +53,14 @@ async function recoverReturnedPayment() {
   }
 
   isRecoveringPayment.value = true
-  paymentStep.value = 'checking'
-  paymentError.value = ''
-
   try {
-    const payment = await getPaymentStatus(pendingRef)
-
-    if (payment.status === 'success' || payment.status === 'failed' || payment.status === 'cancelled') {
-      clearActivePaymentRef()
-      await router.replace({
-        path: '/payment-result',
-        query: { ref: pendingRef, status: payment.status },
-      })
-      return
-    }
-
-    await abandonPayment(pendingRef)
     clearActivePaymentRef()
     await router.replace({
       path: '/payment-result',
-      query: { ref: pendingRef, status: 'cancelled' },
+      query: { ref: pendingRef },
     })
-  } catch (error) {
-    paymentError.value = getErrorMessage(
-      error,
-      'We found an unfinished NETS payment and could not confirm its status.',
-    )
-    paymentStep.value = 'error'
   } finally {
     isRecoveringPayment.value = false
-    if (paymentStep.value === 'checking') {
-      paymentStep.value = 'idle'
-    }
   }
 }
 
@@ -93,7 +70,7 @@ function handlePageShow() {
 
 async function confirmPayment() {
   if (applicationStore.isCurrentSubmitted) {
-    paymentError.value = 'This application has already been submitted. You can review or update it instead.'
+    paymentError.value = 'This application has already been submitted.'
     paymentStep.value = 'error'
     return
   }
@@ -101,35 +78,22 @@ async function confirmPayment() {
   paymentStep.value = 'initiating'
   paymentError.value = ''
 
-  if (!applicationStore.lastEligibilityResult) {
-    const preparation = await applicationStore.prepareSubmission()
-    if (!preparation) {
-      paymentError.value = applicationStore.draftSaveError || 'Please complete your application before paying.'
-      paymentStep.value = 'error'
-      return
-    }
-
-    console.log('Eligibility result:', preparation.eligibility)
+  const submission = applicationStore.getApplyBtoInitiationPayload()
+  if (!submission) {
+    paymentError.value = applicationStore.applicationError || 'Please complete your application before paying.'
+    paymentStep.value = 'error'
+    return
   }
 
   try {
-    const res = await fetch(`${NETS_SERVICE_URL}/payment/initiate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        applicant_id: String(applicationStore.form.nric),
-        amount: APPLICATION_FEE,
-        description: `BTO Application Fee - ${applicantName.value ?? applicationStore.form.nric}`,
-      }),
+    const result = await initiateApplyBtoSubmission({
+      application: submission.application,
+      income_document: submission.incomeDocument,
+      hfe_document: submission.hfeDocument,
+      payment_amount: APPLICATION_FEE,
     })
 
-    const result = await res.json()
-
-    if (result.code !== 200) {
-      throw new Error(result.message ?? 'Payment service error')
-    }
-
-    const { gateway_url, payload, hmac, api_key_id, merchant_txn_ref } = result.data
+    const { gateway_url, payload, hmac, api_key_id, merchant_txn_ref } = result.payment
 
     if (merchant_txn_ref && typeof window !== 'undefined') {
       storePendingPaymentRef(merchant_txn_ref)
@@ -155,9 +119,8 @@ async function confirmPayment() {
     document.body.removeChild(form)
 
     paymentStep.value = 'idle'
-  } catch (err) {
-    paymentError.value =
-      err instanceof Error ? err.message : 'Unable to connect to payment service.'
+  } catch (error) {
+    paymentError.value = getErrorMessage(error, 'Unable to start the Apply BTO payment workflow.')
     paymentStep.value = 'error'
   }
 }
@@ -185,14 +148,17 @@ onBeforeUnmount(() => {
 <template>
   <div class="surface step-card">
     <div class="step-card__copy">
-      <h2>Step 3 - Payment</h2>
-      <p>Eligibility is checked before you enter this step. Confirm here to continue to NETS and pay the application fee.</p>
+      <h2>Step 2 - Payment</h2>
+      <p>
+        Your application details are now captured. We will send the submission to Apply BTO first, then redirect you
+        to NETS. The application record and eligibility checks happen only after payment succeeds.
+      </p>
     </div>
 
     <div class="summary-grid">
       <div class="summary-row">
         <span class="summary-label">Applicant</span>
-        <span class="summary-value">{{ applicantName ?? applicationStore.form.nric }}</span>
+        <span class="summary-value">{{ applicationStore.form.fullName || applicationStore.form.nric }}</span>
       </div>
       <div class="summary-row">
         <span class="summary-label">NRIC</span>
@@ -205,6 +171,10 @@ onBeforeUnmount(() => {
       <div class="summary-row">
         <span class="summary-label">Flat Type</span>
         <span class="summary-value">{{ applicationStore.form.flatType || '-' }}</span>
+      </div>
+      <div class="summary-row">
+        <span class="summary-label">Additional Household Members</span>
+        <span class="summary-value">{{ householdMemberCount }}</span>
       </div>
       <div class="summary-row summary-row--total">
         <span class="summary-label">Application Fee</span>
@@ -228,19 +198,15 @@ onBeforeUnmount(() => {
 
       <div v-if="paymentStep === 'idle'" class="nets-status">
         <ShieldCheck :size="17" />
-        <span>Click <strong>Submit &amp; Pay with NETS</strong> to continue to the secure payment page.</span>
+        <span>Click <strong>Pay with NETS</strong> to send your application to Apply BTO and continue to the secure payment page.</span>
       </div>
       <div v-else-if="paymentStep === 'initiating'" class="nets-status nets-status--processing">
         <span class="nets-spinner" />
-        <span>Preparing your application and checking eligibility...</span>
+        <span>Sending your application to Apply BTO...</span>
       </div>
       <div v-else-if="paymentStep === 'redirecting'" class="nets-status nets-status--processing">
         <span class="nets-spinner" />
         <span>Redirecting to the eNETS gateway...</span>
-      </div>
-      <div v-else-if="paymentStep === 'checking'" class="nets-status nets-status--processing">
-        <span class="nets-spinner" />
-        <span>Checking your unfinished NETS payment...</span>
       </div>
       <div v-else-if="paymentStep === 'error'" class="nets-status nets-status--error">
         <AlertCircle :size="17" />
@@ -252,29 +218,19 @@ onBeforeUnmount(() => {
       <button
         class="btn btn-secondary"
         type="button"
-        :disabled="
-          paymentStep === 'initiating' ||
-          paymentStep === 'redirecting' ||
-          paymentStep === 'checking' ||
-          applicationStore.isPreparingSubmission
-        "
-        @click="router.push('/apply/documents')"
+        :disabled="paymentStep === 'initiating' || paymentStep === 'redirecting'"
+        @click="router.push('/apply/details')"
       >
         Back
       </button>
       <button
         class="btn btn-primary nets-pay-btn"
         type="button"
-        :disabled="
-          paymentStep === 'initiating' ||
-          paymentStep === 'redirecting' ||
-          paymentStep === 'checking' ||
-          applicationStore.isPreparingSubmission
-        "
+        :disabled="paymentStep === 'initiating' || paymentStep === 'redirecting'"
         @click="confirmPayment"
       >
         <CreditCard :size="17" />
-        <span>Submit &amp; Pay with NETS</span>
+        <span>Pay with NETS</span>
       </button>
     </div>
   </div>
