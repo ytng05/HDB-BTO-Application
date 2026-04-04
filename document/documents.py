@@ -55,10 +55,10 @@ db = SQLAlchemy(app)
 class Document(db.Model):
     __tablename__ = "documents"
 
-    document_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    document_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
     application_id = db.Column(db.BigInteger, nullable=False)
     document_type = db.Column(db.String(20), nullable=False)
-    storage_path = db.Column(db.Text, nullable=True)
+    storage_path = db.Column(db.Text, nullable=False)
     status = db.Column(db.String(20), nullable=False)
     fields_json = db.Column(db.JSON, nullable=True)
     uploaded_at = db.Column(db.DateTime, nullable=False, server_default=db.func.current_timestamp())
