@@ -10,7 +10,7 @@ A microservices-based HDB BTO flat application portal built with Vue 3, Flask, a
 |---|---|---|
 | `hdb-frontend` | 5173 | Vue 3 frontend (Vite) |
 | `document-service` | 5050 | Document OCR for income statements and HFE letters |
-| `nets-payment-service` | 5003 | NETS eNETS B2S payment wrapper |
+| `nets-payment-service` | 5003 | NETS eNETS payment wrapper (B2S for local demo; S2S in production) |
 | `ballot-audit-service` | 5000 | Stores ballot run audit records |
 | `flat-service` | 5006 | Provides available flat inventory by project |
 | `flat-selection-service` | 5002 | Stores queue entries for ballot outcomes |
@@ -180,20 +180,34 @@ curl -L "http://localhost:5050/documents/<document_id>/file" -o saved.pdf
 
 ## 7. NETS Payment Flow
 
-The payment uses the eNETS Browser-to-Server (B2S) flow with backend status verification:
+### Production design (interaction diagram)
+
+In production, the intended flow uses the eNETS **Server-to-Server (S2S)** callback, where NETS' servers POST the transaction result directly to the merchant backend — independent of the browser. This is the flow modelled in the interaction diagram:
 
 1. Frontend calls `POST /payment/initiate` on the NETS service
 2. NETS service builds a signed payload and returns the eNETS gateway URL
 3. Frontend submits a hidden form to eNETS in the same tab
 4. User completes payment on the eNETS-hosted card page
-5. eNETS redirects the browser back to `/payment-result`
+5. **eNETS POSTs the result to `/payment/s2s-callback` on the NETS service (server-to-server)**
+6. eNETS also redirects the browser back to `/payment/b2s-callback`, which redirects to `/payment-result`
+7. The frontend calls `GET /payment/status/<merchantTxnRef>` — the record is already updated by the S2S callback
+
+### Local demo (this project)
+
+Because NETS' servers cannot reach `localhost`, the S2S callback cannot be received during local development. This project therefore relies on the **Browser-to-Server (B2S)** callback instead:
+
+1. Frontend calls `POST /payment/initiate` on the NETS service
+2. NETS service builds a signed payload and returns the eNETS gateway URL
+3. Frontend submits a hidden form to eNETS in the same tab
+4. User completes payment on the eNETS-hosted card page
+5. eNETS redirects the browser back to `/payment/b2s-callback` (B2S), which updates the record and redirects to `/payment-result`
 6. The frontend calls `GET /payment/status/<merchantTxnRef>` on the NETS service
 7. The NETS service returns the stored callback result immediately and only falls back to the external query API while the payment is still pending
 
 Notes:
-- `b2s` works locally with `localhost`
-- `s2s` does not work with `localhost`
-- `webhook.site` is useful for proving NETS can hit a public `s2s` URL for free
+- `b2s` works locally with `localhost` — used in this demo
+- `s2s` requires a public HTTPS URL reachable by NETS' servers — used in production
+- `webhook.site` is useful for proving NETS can hit a public `s2s` URL during development
 
 ---
 
