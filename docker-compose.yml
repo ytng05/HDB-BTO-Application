@@ -1,4 +1,55 @@
 services:
+  kong-database:
+    image: postgres:17.4
+    container_name: kong_database
+    restart: always
+    environment:
+      POSTGRES_DB: kong
+      POSTGRES_USER: kong
+      POSTGRES_PASSWORD: password
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "kong"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - kong_pgdata:/var/lib/postgresql/data
+
+  kong-migration:
+    image: kong/kong-gateway:3.9
+    container_name: kong_migration
+    command: "kong migrations bootstrap"
+    restart: on-failure
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: password
+    depends_on:
+      - kong-database
+
+  kong:
+    image: kong/kong-gateway:3.9
+    container_name: kong_gateway
+    restart: always
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: password
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_ADMIN_GUI_URL: http://localhost:8002
+    depends_on:
+      - kong-migration
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+      - "8002:8002"
+
   document-db:
     image: mysql:8.0
     container_name: document_db
@@ -6,7 +57,7 @@ services:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: documents
     ports:
-      - "3312:3306"
+      - "3350:3306"
     volumes:
       - document_db_data:/var/lib/mysql
       - ./document/documents.sql:/docker-entrypoint-initdb.d/documents.sql:ro
@@ -36,7 +87,7 @@ services:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: applications
     ports:
-      - "3313:3306"
+      - "3304:3306"
     volumes:
       - application_db_data:/var/lib/mysql
       - ./application/applications.sql:/docker-entrypoint-initdb.d/applications.sql:ro
@@ -55,6 +106,24 @@ services:
       - application-db
     restart: always
 
+  mockpass-service:
+    build:
+      context: .
+      dockerfile: mockpass/Dockerfile
+    container_name: mockpass_service
+    ports:
+      - "5156:5156"
+    environment:
+      SHOW_LOGIN_PAGE: "true"
+      MOCKPASS_STATELESS: "true"
+      MYINFO_V3_PATH: /app/v3.json
+      # MyInfo v3 Configuration - Use test certificates from npm package (local install)
+      SERVICE_PROVIDER_CERT_PATH: /app/node_modules/@opengovsg/mockpass/static/certs/server.crt
+      SERVICE_PROVIDER_PUB_KEY: /app/node_modules/@opengovsg/mockpass/static/certs/key.pub
+      SERVICE_PROVIDER_MYINFO_SECRET: test-secret-key
+      ENCRYPT_MYINFO: "false"
+    restart: always
+
   singpass-service:
     build:
       context: ./singpass
@@ -63,7 +132,18 @@ services:
     ports:
       - "5007:5007"
     environment:
-      SINGPASS_DATA_PATH: /app/v3.json
+      MOCKPASS_URL: http://mockpass-service:5156
+      MOCKPASS_BROWSER_URL: http://localhost:5156
+      MOCKPASS_AUTH_PATH: /singpass/v2/auth
+      MOCKPASS_CLIENT_ID: hdb-flat-portal
+      # Enable session management: true | false
+      ENABLE_SESSIONS: "true"
+      SESSION_TIMEOUT_MINUTES: 60
+      AUTH_STATE_TIMEOUT_SECONDS: 300
+      FRONTEND_URL: http://localhost:5173
+      FRONTEND_AUTH_CALLBACK_PATH: /auth/callback
+    depends_on:
+      - mockpass-service
     restart: always
 
   hfe-application-db:
@@ -73,7 +153,7 @@ services:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: hfe_applications
     ports:
-      - "3314:3306"
+      - "3309:3306"
     volumes:
       - hfe_application_db_data:/var/lib/mysql
       - ./hfe_application/hfe_application.sql:/docker-entrypoint-initdb.d/hfe_application.sql:ro
@@ -100,11 +180,46 @@ services:
     ports:
       - "5008:5008"
     environment:
-      SINGPASS_SERVICE_URL: http://singpass-service:5007
+      DOCUMENT_SERVICE_URL: http://document-service:5050
       HFE_APPLICATION_SERVICE_URL: http://hfe-application-service:5009
+    restart: always
+
+  validate-eligibility-service:
+    build:
+      context: ./validate_eligibility
+      dockerfile: Dockerfile
+    container_name: validate_eligibility_service
+    ports:
+      - "5013:5013"
+    environment:
+      SINGPASS_SERVICE_URL: http://singpass-service:5007
+      APPLICATION_SERVICE_URL: http://application-service:5004
     depends_on:
       - singpass-service
-      - hfe-application-service
+      - application-service
+    restart: always
+
+  ballot-service:
+    build:
+      context: ./ballot
+      dockerfile: Dockerfile
+    container_name: ballot_service
+    ports:
+      - "5005:5005"
+    restart: always
+
+  apply-bto-service:
+    build:
+      context: ./apply_bto
+      dockerfile: Dockerfile
+    container_name: apply_bto_service
+    ports:
+      - "5010:5010"
+    environment:
+      NETS_PAYMENT_SERVICE_URL: http://nets-payment-service:5003
+      APPLICATION_SERVICE_URL: http://application-service:5004
+      CHECK_ELIGIBILITY_SERVICE_URL: http://check-eligibility-service:5008
+      APPLICATION_FEE: 10
     restart: always
 
   nets-payment-service:
@@ -135,7 +250,7 @@ services:
       dockerfile: Dockerfile
     container_name: notification_api
     ports:
-      - "5005:5000"
+      - "5015:5000"
     env_file:
       - ./cloudamqp/.env
     restart: always
@@ -150,7 +265,146 @@ services:
       - ./cloudamqp/.env
     restart: always
 
+  ballot-audit-db:
+    image: mysql:8.0
+    container_name: ballot_audit_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ballot_audits
+    ports:
+      - "3300:3306"
+    volumes:
+      - ballot_audit_db_data:/var/lib/mysql
+      - ./ballot_audit/ballot_audits.sql:/docker-entrypoint-initdb.d/ballot_audits.sql:ro
+    restart: always
+
+  ballot-audit-service:
+    build:
+      context: ./ballot_audit
+      dockerfile: Dockerfile
+    container_name: ballot_audit_service
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://root:root@ballot-audit-db:3306/ballot_audits
+      PROCESS_BALLOT_SERVICE_URL: http://process-ballot-service:5011
+      REQUEST_TIMEOUT_SECONDS: 20
+      SCHEDULER_TIMEZONE: Asia/Singapore
+    depends_on:
+      - ballot-audit-db
+    restart: always
+
+  flat-db:
+    image: mysql:8.0
+    container_name: flat_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: flat_availability
+    ports:
+      - "3307:3306"
+    volumes:
+      - flat_db_data:/var/lib/mysql
+      - ./flat/flats.sql:/docker-entrypoint-initdb.d/flats.sql:ro
+    restart: always
+
+  flat-service:
+    build:
+      context: ./flat
+      dockerfile: Dockerfile
+    container_name: flat_service
+    ports:
+      - "5006:5006"
+    environment:
+      DB_HOST: flat-db
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: flat_availability
+    depends_on:
+      - flat-db
+    restart: always
+
+  flat-selection-db:
+    image: mysql:8.0
+    container_name: flat_selection_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: flat_selection
+    ports:
+      - "3302:3306"
+    volumes:
+      - flat_selection_db_data:/var/lib/mysql
+      - ./flat_selection/flat_selection.sql:/docker-entrypoint-initdb.d/flat_selection.sql:ro
+    restart: always
+
+  flat-selection-service:
+    build:
+      context: ./flat_selection
+      dockerfile: Dockerfile
+    container_name: flat_selection_service
+    ports:
+      - "5002:5002"
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://root:root@flat-selection-db:3306/flat_selection
+    depends_on:
+      - flat-selection-db
+    restart: always
+
+  project-db:
+    image: mysql:8.0
+    container_name: project_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: projects
+    ports:
+      - "3312:3306"
+    volumes:
+      - project_db_data:/var/lib/mysql
+      - ./project/projects.sql:/docker-entrypoint-initdb.d/projects.sql:ro
+    restart: always
+
+  project-service:
+    build:
+      context: ./project
+      dockerfile: Dockerfile
+    container_name: project_service
+    ports:
+      - "5012:5012"
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://root:root@project-db:3306/projects
+    depends_on:
+      - project-db
+    restart: always
+
+  process-ballot-service:
+    build:
+      context: ./process_ballot
+      dockerfile: Dockerfile
+    container_name: process_ballot_service
+    ports:
+      - "5011:5011"
+    environment:
+      BALLOT_AUDIT_SERVICE_URL: http://ballot-audit-service:5000
+      BALLOT_SERVICE_URL: http://ballot-service:5005
+      APPLICATION_SERVICE_URL: http://application-service:5004
+      PROJECT_SERVICE_URL: http://project-service:5012
+      VALIDATE_ELIGIBILITY_SERVICE_URL: http://validate-eligibility-service:5013
+      FLAT_SELECTION_SERVICE_URL: http://flat-selection-service:5002
+      REQUEST_TIMEOUT_SECONDS: 20
+    depends_on:
+      - application-service
+      - project-service
+      - validate-eligibility-service
+      - ballot-service
+      - flat-selection-service
+    restart: always
+
 volumes:
+  kong_pgdata:
   document_db_data:
   application_db_data:
   hfe_application_db_data:
+  ballot_audit_db_data:
+  flat_db_data:
+  flat_selection_db_data:
+  project_db_data:

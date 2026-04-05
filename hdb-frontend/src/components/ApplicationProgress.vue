@@ -6,7 +6,7 @@ defineProps<{
 </script>
 
 <template>
-  <div class="progress-shell">
+  <div class="progress-shell" :style="{ '--progress-count': steps.length }">
     <div
       v-for="(step, index) in steps"
       :key="step"
@@ -29,7 +29,7 @@ defineProps<{
 <style scoped>
 .progress-shell {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--progress-count), minmax(0, 1fr));
   gap: 12px;
 }
 

@@ -1,87 +1,79 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
-import { LogIn, LogOut, UserRound, X } from 'lucide-vue-next'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { LogIn, LogOut, UserRound } from 'lucide-vue-next'
 import { useAuth } from '@/stores/auth'
 import { useApplicationStore } from '@/stores/application'
-import { singpassLogin } from '@/services/myinfo'
+import { getSingpassAuthLoginUrl, singpassLogout } from '@/services/myinfo'
 
 const route = useRoute()
+const router = useRouter()
 const applicationStore = useApplicationStore()
-const { applicantName, isLoggedIn, login, logout, setSessionNric } = useAuth()
+const { applicantName, isLoggedIn, logout } = useAuth()
+const isLoginConfirmOpen = ref(false)
+const isRedirectingToSingpass = ref(false)
+const pendingLoginUrl = ref('')
 
-const demoAccounts = [
-  'S9812381D',
-  'S9812382B',
-  'S9912375C',
-  'S9912365F',
-  'S9812346F',
-]
-
-const showModal = ref(false)
-const nric = ref('')
-const isLoading = ref(false)
-const loginError = ref('')
-
-function openModal() {
-  showModal.value = true
-  nric.value = ''
-  loginError.value = ''
-}
-
-function closeModal() {
-  showModal.value = false
-}
-
-async function handleLogin() {
-  const formattedNric = nric.value.trim().toUpperCase()
-  if (!formattedNric) {
-    loginError.value = 'Please enter your NRIC.'
+function openLoginConfirm() {
+  if (isRedirectingToSingpass.value) {
     return
   }
 
-  isLoading.value = true
-  loginError.value = ''
+  pendingLoginUrl.value = getSingpassAuthLoginUrl(route.fullPath || '/')
+  isLoginConfirmOpen.value = true
+}
 
-  try {
-    const profile = await singpassLogin(formattedNric)
-    const name = profile?.name ?? formattedNric
-    const digits = formattedNric.replace(/\D/g, '').slice(0, 6)
-    const id = Number.parseInt(digits || '100001', 10)
-    applicationStore.startApplicationLogin(formattedNric, name)
-    login(id, name, formattedNric)
-    setSessionNric(formattedNric)
-    await applicationStore.loadLinkedApplications(formattedNric)
-    closeModal()
-  } catch {
-    loginError.value = 'Login failed. Please try again.'
-  } finally {
-    isLoading.value = false
+function cancelLoginConfirm() {
+  if (isRedirectingToSingpass.value) {
+    return
   }
+
+  isLoginConfirmOpen.value = false
+}
+
+function confirmRedirectToMockPass() {
+  if (isRedirectingToSingpass.value) {
+    return
+  }
+
+  if (!pendingLoginUrl.value) {
+    pendingLoginUrl.value = getSingpassAuthLoginUrl(route.fullPath || '/')
+  }
+
+  isRedirectingToSingpass.value = true
+  // Show a short transition state before handing over to Singpass.
+  window.setTimeout(() => {
+    window.location.assign(pendingLoginUrl.value)
+  }, 150)
 }
 
 const navLinks = computed(() => {
   if (!isLoggedIn.value) return []
 
-  if (route.path === '/') {
-    return [
-      { id: 'dashboard', label: 'Dashboard', to: { path: '/', hash: '#dashboard' } },
-      { id: 'launches', label: 'BTO Launches', to: { path: '/', hash: '#launches' } },
-    ]
-  }
-
-  return []
+  return [
+    { id: 'dashboard', label: 'Dashboard', to: { path: '/', hash: '#dashboard' } },
+    { id: 'admin-ballot', label: 'Admin Ballot', to: { path: '/admin/ballot' } },
+  ]
 })
 
 function isActiveLink(linkId: string) {
-  if (linkId === 'dashboard') return route.path === '/' && route.hash === '#dashboard'
-  if (linkId === 'launches') return route.path === '/' && route.hash === '#launches'
+  if (linkId === 'dashboard') return router.currentRoute.value.path === '/'
+  if (linkId === 'admin-ballot') return router.currentRoute.value.path === '/admin/ballot'
   return false
 }
 
-function handleLogout() {
+async function handleLogout() {
+  try {
+    await singpassLogout()
+  } catch {
+    // Continue local logout even if backend logout fails.
+  }
+
   applicationStore.resetApplication()
   logout()
+  
+  // Navigate to home after logout
+  await router.push({ path: '/', replace: true })
 }
 </script>
 
@@ -92,7 +84,6 @@ function handleLogout() {
         <span class="brand-mark">HDB</span>
         <span class="brand-copy">
           <strong>Flat Portal</strong>
-          <small>Build-To-Order Services</small>
         </span>
       </RouterLink>
 
@@ -117,88 +108,46 @@ function handleLogout() {
             <LogOut :size="17" />
           </button>
         </template>
-        <button v-else class="nav-login" type="button" @click="openModal">
+        <button v-else class="nav-login" type="button" :disabled="isRedirectingToSingpass" @click="openLoginConfirm">
           <LogIn :size="17" />
-          <span>Login</span>
+          <span>{{ isRedirectingToSingpass ? 'Connecting...' : 'Login' }}</span>
         </button>
       </div>
     </div>
   </header>
 
-  <Transition name="modal">
-    <div v-if="showModal" class="modal-backdrop" @click.self="closeModal">
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="login-modal-title">
-        <button class="modal-close" type="button" aria-label="Close" @click="closeModal">
-          <X :size="16" />
+  <div v-if="isLoginConfirmOpen" class="auth-redirect-overlay" role="dialog" aria-modal="true" aria-live="polite">
+    <div class="auth-redirect-card">
+      <p class="auth-redirect-title">Continue to Singpass?</p>
+      <p class="auth-redirect-copy">You are about to leave this page and sign in through MockPass.</p>
+      <div class="auth-redirect-actions">
+        <button class="auth-btn auth-btn--secondary" type="button" :disabled="isRedirectingToSingpass" @click="cancelLoginConfirm">
+          Cancel
         </button>
-
-        <div class="modal-header">
-          <div class="modal-mark">HDB</div>
-          <div>
-            <p class="modal-kicker">Secure Access</p>
-            <h2 id="login-modal-title">Sign In</h2>
-          </div>
-        </div>
-
-        <p class="modal-copy">Enter your NRIC to access the portal.</p>
-
-        <div class="demo-hint">
-          <strong>Demo NRICs:</strong>
-          <button
-            v-for="account in demoAccounts"
-            :key="account"
-            type="button"
-            class="demo-pill"
-            @click="nric = account"
-          >
-            {{ account }}
-          </button>
-        </div>
-
-        <form @submit.prevent="handleLogin">
-          <div class="modal-field">
-            <label for="modal-nric">NRIC Number</label>
-            <input
-              id="modal-nric"
-              v-model="nric"
-              type="text"
-              placeholder="e.g. S1234567A"
-              spellcheck="false"
-              style="text-transform: uppercase"
-              :disabled="isLoading"
-              autofocus
-            />
-          </div>
-
-          <p v-if="loginError" class="modal-error">{{ loginError }}</p>
-
-          <button type="submit" class="btn btn-primary modal-submit" :disabled="isLoading || !nric.trim()">
-            <span v-if="isLoading">Signing in…</span>
-            <span v-else>Sign In</span>
-          </button>
-        </form>
+        <button class="auth-btn auth-btn--primary" type="button" :disabled="isRedirectingToSingpass" @click="confirmRedirectToMockPass">
+          {{ isRedirectingToSingpass ? 'Redirecting...' : 'Continue to Singpass' }}
+        </button>
       </div>
     </div>
-  </Transition>
+  </div>
 </template>
 
 <style scoped>
+/* Layout */
 .nav-shell {
-  position: fixed;
-  top: 0;
-  right: 0;
-  left: 0;
+  position: relative;
   z-index: 1000;
-  border-top: 3px solid var(--color-red);
-  border-bottom: 1px solid rgba(29, 29, 31, 0.08);
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+  background: var(--color-white);
+  border-bottom: 1px solid var(--color-border);
+  height: var(--nav-height, 60px);
 }
 
 .nav-inner {
   display: grid;
-  grid-template-columns: minmax(220px, auto) 1fr auto;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
+  padding: 0 20px;
+  height: 100%;
   gap: 24px;
   min-height: calc(var(--nav-height) - 3px);
 }
@@ -324,6 +273,11 @@ function handleLogout() {
   transition: background 0.15s ease, color 0.15s ease;
 }
 
+.nav-login:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .nav-login:hover {
   background: var(--color-red);
   color: var(--color-white);
@@ -347,191 +301,69 @@ function handleLogout() {
   color: var(--color-red);
 }
 
-/* Modal */
-.modal-backdrop {
+.auth-redirect-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1100;
+  z-index: 2000;
   display: grid;
   place-items: center;
-  padding: 24px;
-  background: rgba(15, 23, 38, 0.48);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  padding: 20px;
+  background: rgba(29, 29, 31, 0.35);
 }
 
-.modal {
-  position: relative;
-  width: min(480px, 100%);
-  display: grid;
-  gap: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.97);
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
-  padding: 32px;
+.auth-redirect-card {
+  width: min(420px, 100%);
+  border-radius: 14px;
+  border: 1px solid rgba(29, 29, 31, 0.12);
+  background: #fff;
+  padding: 20px;
+  text-align: center;
+  box-shadow: 0 16px 30px rgba(29, 29, 31, 0.18);
 }
 
-.modal-close {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  background: transparent;
-  color: rgba(29, 29, 31, 0.56);
-  cursor: pointer;
-}
-
-.modal-close:hover {
-  color: var(--color-red);
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding-right: 28px;
-}
-
-.modal-mark {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #d31d3c 0%, var(--color-red) 100%);
-  color: var(--color-white);
-  font-size: 0.82rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  flex-shrink: 0;
-}
-
-.modal-kicker {
-  margin: 0 0 4px;
-  font-size: 0.7rem;
+.auth-redirect-title {
+  margin: 0;
+  font-size: 1.02rem;
   font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: rgba(29, 29, 31, 0.5);
-}
-
-.modal-header h2 {
-  margin: 0;
-  font-size: 1.6rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
   color: var(--color-charcoal);
 }
 
-.modal-copy {
-  margin: 0;
+.auth-redirect-copy {
+  margin: 8px 0 0;
+  color: rgba(29, 29, 31, 0.72);
   font-size: 0.94rem;
-  color: rgba(29, 29, 31, 0.65);
 }
 
-.demo-hint {
+.auth-redirect-actions {
+  margin-top: 16px;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: rgba(29, 29, 31, 0.04);
-  font-size: 0.84rem;
+  gap: 10px;
+  justify-content: center;
 }
 
-.demo-hint strong {
-  color: rgba(29, 29, 31, 0.65);
-}
-
-.demo-pill {
-  padding: 3px 10px;
-  border: 1px solid var(--color-border);
+.auth-btn {
+  min-height: 38px;
+  padding: 0 14px;
   border-radius: 999px;
-  background: var(--color-white);
-  color: var(--color-charcoal);
-  font-size: 0.82rem;
-  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-weight: 600;
   cursor: pointer;
-  transition: border-color 0.15s ease;
 }
 
-.demo-pill:hover {
-  border-color: var(--color-red);
-  color: var(--color-red);
-}
-
-.modal-field {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.modal-field label {
-  font-size: 0.86rem;
-  font-weight: 600;
-  color: var(--color-charcoal);
-}
-
-.modal-field input {
-  height: 48px;
-  padding: 0 16px;
+.auth-btn--secondary {
   border: 1px solid var(--color-border);
-  border-radius: 10px;
-  background: var(--color-white);
-  font-size: 1rem;
+  background: #fff;
   color: var(--color-charcoal);
-  outline: none;
-  transition: border-color 0.15s ease;
 }
 
-.modal-field input:focus {
-  border-color: var(--color-red);
+.auth-btn--primary {
+  border: 1px solid var(--color-red);
+  background: var(--color-red);
+  color: #fff;
 }
 
-.modal-field input:disabled {
-  opacity: 0.6;
-}
-
-.modal-error {
-  margin: 0 0 12px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  background: rgba(163, 18, 25, 0.06);
-  color: var(--color-red);
-  font-size: 0.88rem;
-  font-weight: 600;
-}
-
-.modal-submit {
-  width: 100%;
-  height: 48px;
-}
-
-/* Transitions */
-.modal-enter-active,
-.modal-leave-active {
-  transition: opacity 180ms ease;
-}
-
-.modal-enter-from,
-.modal-leave-to {
-  opacity: 0;
-}
-
-.modal-enter-active .modal {
-  transition: transform 220ms ease, opacity 220ms ease;
-}
-
-.modal-enter-from .modal {
-  transform: translateY(10px) scale(0.97);
-  opacity: 0;
+.auth-btn:disabled {
+  opacity: 0.65;
+  cursor: wait;
 }
 
 @media (max-width: 640px) {
@@ -541,10 +373,6 @@ function handleLogout() {
 
   .nav-links {
     display: none;
-  }
-
-  .modal {
-    padding: 24px 20px;
   }
 }
 </style>

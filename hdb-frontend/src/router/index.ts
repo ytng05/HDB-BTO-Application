@@ -2,13 +2,15 @@ import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '@/views/HomeView.vue'
 import ApplyLayout from '@/views/ApplyLayout.vue'
 import FlatSelectionView from '@/views/FlatSelectionView.vue'
+import AdminBallotView from '@/views/AdminBallotView.vue'
 import ApplyDetailsView from '@/views/apply/ApplyDetailsView.vue'
-import ApplyDocumentsView from '@/views/apply/ApplyDocumentsView.vue'
 import ApplyPaymentView from '@/views/apply/ApplyPaymentView.vue'
 import ApplyReviewView from '@/views/apply/ApplyReviewView.vue'
 import PaymentResultView from '@/views/PaymentResultView.vue'
+import AuthCallbackView from '@/views/AuthCallbackView.vue'
 import { useAuth } from '@/stores/auth'
 import { useApplicationStore } from '@/stores/application'
+import { validateSession } from '@/services/myinfo'
 import { pinia } from '@/stores/pinia'
 
 const router = createRouter({
@@ -31,8 +33,29 @@ const router = createRouter({
       component: HomeView,
     },
     {
-      path: '/login',
-      redirect: '/',
+      path: '/auth/callback',
+      name: 'auth-callback',
+      component: AuthCallbackView,
+      alias: ['/auth/callback/'],
+    },
+    {
+      path: '/auth/:pathMatch(.*)*',
+      beforeEnter: (to) => {
+        const raw = to.params.pathMatch
+        const value = Array.isArray(raw) ? raw.join('/') : String(raw ?? '')
+        const normalized = value.replace(/^\/+|\/+$/g, '').toLowerCase()
+
+        // Accept common callback URL variants/typos and normalize them.
+        if (normalized.startsWith('callback')) {
+          return {
+            path: '/auth/callback',
+            query: to.query,
+            replace: true,
+          }
+        }
+
+        return { path: '/' }
+      },
     },
     {
       path: '/apply',
@@ -40,11 +63,7 @@ const router = createRouter({
       children: [
         {
           path: '',
-          redirect: '/apply/details',
-        },
-        {
-          path: 'login',
-          redirect: '/',
+          redirect: 'details',
         },
         {
           path: 'details',
@@ -56,20 +75,11 @@ const router = createRouter({
           },
         },
         {
-          path: 'documents',
-          name: 'apply-documents',
-          component: ApplyDocumentsView,
-          meta: {
-            applyStepIndex: 1,
-            requiresAuth: true,
-          },
-        },
-        {
           path: 'payment',
           name: 'apply-payment',
           component: ApplyPaymentView,
           meta: {
-            applyStepIndex: 2,
+            applyStepIndex: 1,
             requiresAuth: true,
           },
         },
@@ -98,19 +108,36 @@ const router = createRouter({
       },
     },
     {
-      path: '/flat-selection',
-      redirect: '/select-flat',
+      path: '/admin/ballot',
+      name: 'admin-ballot',
+      component: AdminBallotView,
+      meta: {
+        requiresAuth: true,
+      },
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      redirect: '/',
     },
   ],
 })
 
-router.beforeEach((to) => {
-  const { isLoggedIn, restoreSession } = useAuth()
+router.beforeEach(async (to) => {
+  const { isLoggedIn, restoreSession, logout } = useAuth()
   const applicationStore = useApplicationStore(pinia)
   restoreSession()
 
-  if (to.meta.requiresAuth && !isLoggedIn.value) {
-    return { path: '/' }
+  if (to.meta.requiresAuth) {
+    if (!isLoggedIn.value) {
+      return { path: '/' }
+    }
+
+    const sessionValid = await validateSession()
+    if (!sessionValid) {
+      applicationStore.resetApplication()
+      logout()
+      return { path: '/' }
+    }
   }
 
   if (to.meta.requiresBallot && !applicationStore.hasBallotAccess) {

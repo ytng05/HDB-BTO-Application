@@ -21,19 +21,19 @@ interface ProjectLookupEntry {
 
 export const heroSlides: HeroSlide[] = [
   {
-    title: 'Tengah GreenVille',
+    title: 'Tengah Garden Walk',
     town: 'Tengah',
     topDate: 'Q4 2028',
     image: 'https://picsum.photos/1400/600?random=1',
   },
   {
-    title: 'Kallang Horizon',
+    title: 'Kallang RiverFront',
     town: 'Kallang/Whampoa',
     topDate: 'Q2 2029',
     image: 'https://picsum.photos/1400/600?random=2',
   },
   {
-    title: 'Queenstown Ridges',
+    title: 'Queenstown SkyGrove',
     town: 'Queenstown',
     topDate: 'Q1 2028',
     image: 'https://picsum.photos/1400/600?random=3',
@@ -42,7 +42,7 @@ export const heroSlides: HeroSlide[] = [
 
 export const upcomingProjects: UpcomingProject[] = [
   {
-    title: 'Tengah GreenVille',
+    title: 'Tengah Garden Walk',
     town: 'Tengah',
     flatTypes: '2-Room Flexi to 5-Room',
     openDate: '10 March 2025',
@@ -50,7 +50,7 @@ export const upcomingProjects: UpcomingProject[] = [
     image: 'https://upload.wikimedia.org/wikipedia/commons/d/da/Tengah_Singapore_HDB_20240529_143609.jpg',
   },
   {
-    title: 'Kallang Horizon',
+    title: 'Kallang RiverFront',
     town: 'Kallang/Whampoa',
     flatTypes: '3-Room to 5-Room',
     openDate: '24 March 2025',
@@ -59,7 +59,7 @@ export const upcomingProjects: UpcomingProject[] = [
       'https://upload.wikimedia.org/wikipedia/commons/4/4b/%28SGP-Singapore%29_Kallang_Horizon_HDB_blocks_under_construction_2024-02-16.jpg',
   },
   {
-    title: 'Queenstown Ridges',
+    title: 'Queenstown SkyGrove',
     town: 'Queenstown',
     flatTypes: '2-Room Flexi to 5-Room',
     openDate: '07 April 2025',
@@ -143,7 +143,7 @@ const projectLookup: Record<number, ProjectLookupEntry> = {
   },
   52: {
     name: 'Kallang RiverFront',
-    town: 'Kallang',
+    town: 'Kallang/Whampoa',
   },
   53: {
     name: 'Geylang East Crest',

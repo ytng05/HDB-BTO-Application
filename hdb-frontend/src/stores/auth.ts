@@ -18,7 +18,7 @@ function restoreSession() {
     return
   }
 
-  const rawSession = window.localStorage.getItem(STORAGE_KEY)
+  const rawSession = window.sessionStorage.getItem(STORAGE_KEY)
   if (!rawSession) {
     return
   }
@@ -29,7 +29,7 @@ function restoreSession() {
     applicantName.value = typeof parsedSession.name === 'string' ? parsedSession.name : null
     applicantNric.value = typeof parsedSession.nric === 'string' ? parsedSession.nric : null
   } catch {
-    window.localStorage.removeItem(STORAGE_KEY)
+    window.sessionStorage.removeItem(STORAGE_KEY)
     applicantId.value = null
     applicantName.value = null
     applicantNric.value = null
@@ -48,7 +48,7 @@ function login(id: number, name: string, nric: string | null = null) {
       nric: applicantNric.value,
     }
 
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session))
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session))
   }
 }
 
@@ -58,8 +58,7 @@ function logout() {
   applicantNric.value = null
 
   if (typeof window !== 'undefined') {
-    window.localStorage.removeItem(STORAGE_KEY)
-    window.location.assign('/login')
+    window.sessionStorage.removeItem(STORAGE_KEY)
   }
 }
 

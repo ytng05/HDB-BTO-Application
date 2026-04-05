@@ -1,5 +1,6 @@
-"""OCR service for income statements and HFE letters."""
+﻿"""OCR service for income statements and HFE letters."""
 
+import io
 import hashlib
 import os
 import re
@@ -8,7 +9,10 @@ from pathlib import Path
 try:
     import pymupdf as fitz  # PyMuPDF
 except ImportError:
-    import fitz  # type: ignore[no-redef]
+    try:
+        import fitz  # type: ignore[no-redef]
+    except Exception:  # pragma: no cover - local environment fallback
+        fitz = None  # type: ignore[assignment]
 
 import pytesseract
 from flask import Flask, jsonify, request, send_file
@@ -17,6 +21,11 @@ from flasgger import Swagger
 from flask_sqlalchemy import SQLAlchemy
 from pdf2image import convert_from_bytes
 from PIL import Image, ImageFilter
+
+try:
+    from pypdf import PdfReader
+except ImportError:  # pragma: no cover - optional direct-text fallback
+    PdfReader = None  # type: ignore[assignment]
 
 app = Flask(__name__)
 CORS(app)
@@ -46,14 +55,15 @@ db = SQLAlchemy(app)
 class Document(db.Model):
     __tablename__ = "documents"
 
-    document_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    document_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
     application_id = db.Column(db.BigInteger, nullable=False)
     document_type = db.Column(db.String(20), nullable=False)
-    storage_path = db.Column(db.Text, nullable=True)
+    storage_path = db.Column(db.Text, nullable=False)
     status = db.Column(db.String(20), nullable=False)
     fields_json = db.Column(db.JSON, nullable=True)
     uploaded_at = db.Column(db.DateTime, nullable=False, server_default=db.func.current_timestamp())
 
+    # what this function does for the service: Handles to dict for this service.
     def to_dict(self):
         return {
             "document_id": self.document_id,
@@ -66,15 +76,18 @@ class Document(db.Model):
         }
 
 
+# what this function does for the service: Handles init storage for this service.
 def init_storage():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+# what this function does for the service: Handles get document record for this service.
 def get_document_record(document_id):
     return db.session.get(Document, document_id)
 
 
+# what this function does for the service: Handles get existing document for this service.
 def get_existing_document(application_id, document_type):
     if not application_id:
         return None
@@ -86,6 +99,7 @@ def get_existing_document(application_id, document_type):
     return db.session.scalar(query)
 
 
+# what this function does for the service: Handles save document record for this service.
 def save_document_record(
     application_id,
     document_type,
@@ -107,6 +121,7 @@ def save_document_record(
     return existing
 
 
+# what this function does for the service: Handles update document record for this service.
 def update_document_record(document_id, document_type, status, fields):
     existing = get_document_record(document_id)
     if existing is None:
@@ -118,19 +133,22 @@ def update_document_record(document_id, document_type, status, fields):
     db.session.commit()
 
 
+# what this function does for the service: Handles  preprocess for this service.
 def _preprocess(img):
     """Improve OCR accuracy for scanned PDFs."""
     return img.convert("L").point(lambda p: 255 if p > 180 else 0).filter(ImageFilter.SHARPEN)
 
 
+# what this function does for the service: Handles  normalize text for this service.
 def _normalize_text(text):
     text = text.replace("\r", "\n").replace("\xa0", " ")
-    text = text.replace("Ã¢â‚¬â€œ", "-").replace("Ã¢â‚¬â€", "-")
+    text = text.replace("ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“", "-").replace("ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â", "-")
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
+# what this function does for the service: Handles  looks like usable text for this service.
 def _looks_like_usable_text(text):
     stripped = text.strip()
     if len(stripped) < 80:
@@ -140,19 +158,43 @@ def _looks_like_usable_text(text):
     return alpha_count >= 40
 
 
+# what this function does for the service: Handles  extract text with pymupdf for this service.
+def _extract_text_with_pymupdf(pdf_bytes):
+    if fitz is None:
+        return ""
+
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        return "\n\n".join(page.get_text() for page in doc)
+    finally:
+        doc.close()
+
+
+# what this function does for the service: Handles  extract text with pypdf for this service.
+def _extract_text_with_pypdf(pdf_bytes):
+    if PdfReader is None:
+        return ""
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    return "\n\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+# what this function does for the service: Handles pdf bytes to text for this service.
 def pdf_bytes_to_text(pdf_bytes, dpi=200):
     """Extract text from a PDF with OCR fallback for scanned pages."""
     direct_text = ""
 
-    try:
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        direct_text = "\n\n".join(page.get_text() for page in doc)
-        doc.close()
-        direct_text = _normalize_text(direct_text)
-        if _looks_like_usable_text(direct_text):
-            return direct_text
-    except Exception:
-        pass
+    for extractor in (_extract_text_with_pymupdf, _extract_text_with_pypdf):
+        try:
+            candidate = _normalize_text(extractor(pdf_bytes))
+        except Exception:
+            continue
+
+        if _looks_like_usable_text(candidate):
+            return candidate
+
+        if not direct_text and candidate:
+            direct_text = candidate
 
     images = convert_from_bytes(pdf_bytes, dpi=dpi)
     ocr_text = "\n\n".join(
@@ -167,11 +209,13 @@ def pdf_bytes_to_text(pdf_bytes, dpi=200):
     return direct_text or ocr_text
 
 
+# what this function does for the service: Handles  find for this service.
 def _find(pattern, text, flags=re.IGNORECASE):
     match = re.search(pattern, text, flags)
     return match.group(1).strip() if match else None
 
 
+# what this function does for the service: Handles  find money for this service.
 def _find_money(pattern, text):
     raw = _find(pattern, text)
     if not raw:
@@ -183,6 +227,7 @@ def _find_money(pattern, text):
         return None
 
 
+# what this function does for the service: Handles  next non empty line for this service.
 def _next_non_empty_line(lines, start_index):
     for idx in range(start_index, len(lines)):
         value = lines[idx].strip()
@@ -191,6 +236,7 @@ def _next_non_empty_line(lines, start_index):
     return None, start_index
 
 
+# what this function does for the service: Handles  find multiline value for this service.
 def _find_multiline_value(pattern, text, flags=re.IGNORECASE):
     """Extract a value that may span multiple lines after a label."""
     match = re.search(pattern, text, flags)
@@ -203,10 +249,74 @@ def _find_multiline_value(pattern, text, flags=re.IGNORECASE):
     return value or None
 
 
+# what this function does for the service: Handles find labelled value for this service.
+def _find_label_value(label, text, stop_labels=None):
+    """Extract a value after a label until the next known label or line ending."""
+    if not label:
+        return None
+
+    stop_labels = stop_labels or []
+    stop_pattern = "|".join(re.escape(item) for item in stop_labels if item)
+    if stop_pattern:
+        pattern = rf"{label}\s*[:\s]+\s*(.+?)(?=\s+(?:{stop_pattern})\s*[:\s]+|$)"
+        return _find_multiline_value(pattern, text, re.IGNORECASE | re.DOTALL)
+
+    return _find_multiline_value(rf"{label}\s*[:\s]+\s*(.+?)(?:$)", text, re.IGNORECASE | re.DOTALL)
+
+
+# what this function does for the service: Handles find amount between labels for this service.
+def _find_money_between_labels(label, text, stop_labels=None):
+    raw = _find_label_value(label, text, stop_labels=stop_labels)
+    if not raw:
+        return None
+
+    try:
+        return float(re.sub(r"[^\d.]", "", raw))
+    except ValueError:
+        return None
+
+
+# what this function does for the service: Handles normalize text token for this service.
+def _clean_inline_value(value):
+    if not value:
+        return None
+
+    value = re.sub(r"\s{2,}", " ", value).strip(" :-")
+    return value or None
+
+
+# what this function does for the service: Handles normalize document reference for this service.
+def _normalize_reference_value(value):
+    cleaned = _clean_inline_value(value)
+    if not cleaned:
+        return None
+
+    cleaned = cleaned.replace("\n", " ")
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    if cleaned.upper().startswith("CPF-"):
+        cleaned = cleaned.replace(" ", "")
+    return cleaned
+
+
+# what this function does for the service: Handles extract standard income for this service.
 def extract_standard_income(text):
+    if re.search(r"CPF\s+CONTRIBUTION\s+HISTORY", text, re.IGNORECASE):
+        document_variant = "cpf_contribution_history"
+    elif re.search(r"EMPLOYEE\s+INCOME\s+STATEMENT", text, re.IGNORECASE):
+        document_variant = "employee_income_statement"
+    elif re.search(r"PAYSLIP\s+SUMMARY", text, re.IGNORECASE):
+        document_variant = "payslip_summary"
+    else:
+        document_variant = "standard_income_statement"
+
     employer_raw = (
         _find_multiline_value(
             r"Employer Name[:\s]*(.+?)(?:\n(?:Employer UEN|Employment Type|Designation|Occupation|Years of Service)|$)",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        or _find_multiline_value(
+            r"Employer\s*/\s*Source[:\s]*(.+?)(?=\s+(?:UEN\s*/\s*Tax\s*Ref|Employer\s+UEN|Employment Type|Designation|Occupation|Years of Service)\s*[:\s]+|$)",
             text,
             re.IGNORECASE | re.DOTALL,
         )
@@ -214,13 +324,14 @@ def extract_standard_income(text):
     )
 
     full_name = _find_multiline_value(
-        r"(?:Full Name(?: \(as per NRIC\))?|Employee Name)[:\s]*(.+?)(?:\n(?:Statement Reference|Application Ref(?:erence)?(?: No\.?)?|NRIC|Date of Birth|Date of Issue|Employer|Designation)|$)",
+        r"(?:Full Name(?: \(as per NRIC\))?|Employee Name)[:\s]*(.+?)(?:\n(?:Statement Reference|Reference No\.?|Application Ref(?:erence)?(?: No\.?)?|NRIC|Date of Birth|Date of Issue|Employer|Designation)|$)",
         text,
         re.IGNORECASE | re.DOTALL,
     )
 
     total_gross = (
         _find_money(r"TOTAL GROSS INCOME[^:]*:\s+S?\$?\s*([\d,]+\.?\d*)", text)
+        or _find_money(r"Total Annual Gross Income\s*\(\d{4}\)[:\s]+S?\$?\s*([\d,]+\.?\d*)", text)
         or _find_money(r"TOTAL INCOME[:\s]+([\d,]+\.?\d*)", text)
         or _find_money(r"Total Gross Revenue.*?:\s+S?\$?\s*([\d,]+\.?\d*)", text)
     )
@@ -232,11 +343,20 @@ def extract_standard_income(text):
     )
 
     doc_ref = (
+        _normalize_reference_value(_find_label_value(
+            r"Reference No\.?",
+            text,
+            stop_labels=["NRIC", "Date of Issue", "Date of Birth", "Period Covered", "Nationality"],
+        ))
+        or
         _find(r"Statement Reference[:\s]+(CPF-[\w-]+)", text)
         or _find(r"(?:Document Ref|NOA Reference|Application Ref(?:erence)?(?: No\.?)?)[:\s]+([\w-]+)", text)
+        or _find(r"Ref[:\s]+([A-Z0-9-]+)", text)
     )
 
     period = (
+        _find(r"Period Covered[:\s]+([^\n]+?)(?=\s+(?:Nationality|Residential Status|EMPLOYER|Employer)|$)", text)
+        or
         _find_multiline_value(
             r"Statement Period[:\s]*(.+?)(?:\n(?:Nationality|Resid(?:ency|ential)\s+Status|EMPLOYER DETAILS)|$)",
             text,
@@ -248,14 +368,17 @@ def extract_standard_income(text):
     )
 
     return {
-        "document_variant": "standard_income_statement",
+        "document_variant": document_variant,
         "full_name": full_name,
-        "nric": _find(r"NRIC(?:/UIN)?(?:\s+(?:Number|No\.?))?[:\s]+([A-Z]\d{7}[A-Z])", text),
+        "nric": _find(r"NRIC(?:\s*/\s*UIN)?(?:\s+(?:Number|No\.?))?[:\s]+([A-Z]\d{7}[A-Z])", text),
         "date_of_birth": _find(r"Date of Birth[:\s]+(\d{1,2}\s+\w+\s+\d{4})", text),
         "nationality": _find(r"Nationality[:\s]+([^\n]+)", text),
         "residency_status": _find(r"Resid(?:ency|ential)\s+Status[:\s]+([^\n]+)", text),
         "employer_name": " ".join(employer_raw.split()) if employer_raw else None,
-        "employer_uen": _find(r"Employer UEN[:\s]+(\w+)", text),
+        "employer_uen": (
+            _find(r"Employer UEN[:\s]+(\w+)", text)
+            or _find(r"UEN\s*/\s*Tax\s*Ref[:\s]+([A-Z0-9]+)", text)
+        ),
         "employment_type": _find(r"Employment Type[:\s]+([^\n]+)", text),
         "occupation": _find(r"(?:Occupation|Designation)[:\s]+([^\n]+)", text),
         "total_ordinary_wages": _find_money(r"Total Ordinary Wages[^:]*:\s+S?\$?\s*([\d,]+\.\d{2})", text),
@@ -268,6 +391,7 @@ def extract_standard_income(text):
     }
 
 
+# what this function does for the service: Handles extract self employed income for this service.
 def extract_self_employed_income(text):
     return {
         "document_variant": "self_employed_income_declaration",
@@ -305,11 +429,12 @@ def extract_self_employed_income(text):
     }
 
 
+# what this function does for the service: Handles  extract joint income applicants for this service.
 def _extract_joint_income_applicants(text):
     applicants = []
 
     for applicant_number in (1, 2):
-        header_pattern = rf"APPLICANT {applicant_number}.*?(?=APPLICANT {applicant_number} - MONTHLY INCOME|JOINT HOUSEHOLD INCOME SUMMARY|$)"
+        header_pattern = rf"APPLICANT {applicant_number}\b.*?(?=APPLICANT {applicant_number}\s+[—-]\s+MONTHLY INCOME|APPLICANT {applicant_number}\s*-\s*MONTHLY INCOME|JOINT HOUSEHOLD INCOME SUMMARY|$)"
         block_match = re.search(header_pattern, text, re.IGNORECASE | re.DOTALL)
         if not block_match:
             continue
@@ -328,7 +453,7 @@ def _extract_joint_income_applicants(text):
             {
                 "applicant_number": applicant_number,
                 "name": _find_multiline_value(
-                    r"Full Name[:\s]*(.+?)(?:\n(?:Application Ref|NRIC|Date of Issue|Date of Birth|Nationality|Employer)|$)",
+                    r"Full Name[:\s]*(.+?)(?=\s+(?:Application Ref|NRIC|Date of Issue|Date of Birth|Nationality|Employer)\s*[:\s]+|$)",
                     block,
                     re.IGNORECASE | re.DOTALL,
                 ),
@@ -336,7 +461,7 @@ def _extract_joint_income_applicants(text):
                 "date_of_birth": _find(r"Date of Birth[:\s]+(\d{1,2}\s+\w+\s+\d{4})", block),
                 "nationality": _find(r"Nationality[:\s]+([^\n]+)", block),
                 "employer_name": _find_multiline_value(
-                    r"Employer[:\s]*(.+?)(?:\n(?:Designation|Employment Type|Years of Service|APPLICANT \d+ - MONTHLY INCOME)|$)",
+                    r"Employer[:\s]*(.+?)(?=\s+(?:Designation|Employment Type|Years of Service|APPLICANT \d+\s+[—-]\s+MONTHLY INCOME|APPLICANT \d+\s*-\s*MONTHLY INCOME)\s*[:\s]+|$)",
                     block,
                     re.IGNORECASE | re.DOTALL,
                 ),
@@ -350,6 +475,7 @@ def _extract_joint_income_applicants(text):
     return applicants
 
 
+# what this function does for the service: Handles extract joint income for this service.
 def extract_joint_income(text):
     applicants = _extract_joint_income_applicants(text)
     main_applicant = applicants[0] if applicants else {}
@@ -363,7 +489,7 @@ def extract_joint_income(text):
         "employment_type": main_applicant.get("employment_type"),
         "occupation": main_applicant.get("occupation"),
         "statement_reference": _find(r"(?:Application Ref|Ref)[:\s]+([\w-]+)", text),
-        "statement_period": _find(r"MONTHLY INCOME \(([A-Z]{3}\s+\d{4}\s*-\s*[A-Z]{3}\s+\d{4})\)", text),
+        "statement_period": _find(r"MONTHLY INCOME\s*\(([A-Z]{3}\s+\d{4}\s*(?:-|—)\s*[A-Z]{3}\s+\d{4})\)", text),
         "date_of_issue": _find(r"Date of Issue[:\s]+(\d{1,2}\s+\w+\s+\d{4})", text),
         "total_gross_income": _find_money(r"COMBINED ANNUAL GROSS INCOME[:\s]+S?\$?\s*([\d,]+\.?\d*)", text),
         "average_monthly_income": _find_money(r"COMBINED AVERAGE MONTHLY GROSS[:\s]+S?\$?\s*([\d,]+\.?\d*)", text),
@@ -376,6 +502,7 @@ def extract_joint_income(text):
     }
 
 
+# what this function does for the service: Handles extract income for this service.
 def extract_income(text):
     """Extract fields from the supported income document variants."""
     if re.search(r"JOINT\s+INCOME\s+STATEMENT|JOINT\s+HOUSEHOLD\s+INCOME\s+DECLARATION", text, re.IGNORECASE):
@@ -387,85 +514,117 @@ def extract_income(text):
     return extract_standard_income(text)
 
 
+# what this function does for the service: Handles  extract applicants for this service.
 def _extract_applicants(text):
-    """Parse applicant blocks from an HFE letter line by line."""
+    """Parse applicant blocks from an HFE letter."""
     applicants = []
-    lines = [line.strip() for line in text.splitlines()]
-    i = 0
 
-    while i < len(lines):
-        line = lines[i]
-        name_match = re.search(r"Applicant\s+(\d+)\s+Name[:\s]*(.*)", line, re.IGNORECASE)
-        if not name_match:
-            i += 1
+    for applicant_num in (1, 2):
+        block_match = re.search(
+            rf"Applicant\s+{applicant_num}\s+Name[:\s].*?(?=Applicant\s+{applicant_num + 1}\s+Name[:\s]|HFE\s+Reference\s+No\.?|MyDoc\s+Reference\s+No\.?|Date\s+of\s+Issue[:\s]|$)",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if not block_match:
             continue
 
-        applicant_num = int(name_match.group(1))
-        name = name_match.group(2).strip() or None
-        nric = None
-        role = None
+        block = block_match.group(0)
+        name = _find_multiline_value(
+            rf"Applicant\s+{applicant_num}\s+Name[:\s]*(.+?)(?=\s+Applicant\s+{applicant_num}\s+NRIC/UIN\s+No\.?|\s+NRIC/UIN\s+No\.?|\s+Role[:\s]|$)",
+            block,
+            re.IGNORECASE | re.DOTALL,
+        )
+        nric = _find(rf"Applicant\s+{applicant_num}\s+NRIC/UIN\s+No\.?[:\s]+([A-Z]\d{{7}}[A-Z])", block)
+        if not nric:
+            nric = _find(r"NRIC/UIN\s+No\.?[:\s]+([A-Z]\d{7}[A-Z])", block)
+        role = _find_multiline_value(
+            r"Role[:\s]*(.+?)(?=\s+Residential Status[:\s]|\s+Applicant\s+\d+\s+Name[:\s]|\s+HFE\s+Reference\s+No\.?|$)",
+            block,
+            re.IGNORECASE | re.DOTALL,
+        )
 
-        if not name:
-            name, i = _next_non_empty_line(lines, i + 1)
-            if name and re.fullmatch(r"Applicant\s+\d+", name, re.IGNORECASE):
-                name, i = _next_non_empty_line(lines, i + 1)
-
-        j = i + 1
-        while j < len(lines):
-            current = lines[j]
-            if re.search(r"Applicant\s+\d+\s+Name", current, re.IGNORECASE):
-                break
-            if re.search(r"HFE\s+Reference\s+No", current, re.IGNORECASE):
-                break
-
-            if re.search(r"NRIC/UIN\s+No\.?", current, re.IGNORECASE):
-                same_line = _find(r"NRIC/UIN\s+No\.?[:\s]+([A-Z]\d{7}[A-Z])", current)
-                if same_line:
-                    nric = same_line
-                else:
-                    nric, j = _next_non_empty_line(lines, j + 1)
-            elif not nric and re.fullmatch(r"[A-Z]\d{7}[A-Z]", current):
-                nric = current
-
-            if re.search(r"Role[:\s]*", current, re.IGNORECASE):
-                same_line = _find(r"Role[:\s]+(.+)", current)
-                if same_line:
-                    role = same_line
-                else:
-                    role, j = _next_non_empty_line(lines, j + 1)
-
-            j += 1
-
-        if name or nric or role:
-            applicants.append(
-                {
-                    "applicant_number": applicant_num,
-                    "name": name,
-                    "nric": nric,
-                    "role": role,
-                }
-            )
-
-        i = j
+        applicants.append(
+            {
+                "applicant_number": applicant_num,
+                "name": _clean_inline_value(name),
+                "nric": _clean_inline_value(nric),
+                "role": _clean_inline_value(role),
+            }
+        )
 
     return applicants
 
 
+# what this function does for the service: Handles extract hfe for this service.
 def extract_hfe(text):
+    assessment_outcome = (
+        _find_label_value(
+            r"Assessment\s+Outcome",
+            text,
+            stop_labels=["Housing Grants Eligibility", "Grant Type", "Important Notes", "Total Grants Eligible"],
+        )
+        or (
+            "NOT ELIGIBLE"
+            if re.search(r"HFE\s+letter\s+Not\s+Approved|NOT\s+approved|NOT\s+ELIGIBLE", text, re.IGNORECASE)
+            else "ELIGIBLE" if re.search(r"HFE\s+letter\s+Approved|\bELIGIBLE\b", text, re.IGNORECASE) else None
+        )
+    )
+
     return {
         "applicants": _extract_applicants(text),
         "hfe_reference_no": _find(r"HFE\s+Reference\s+No\.?\s*[:\s]+(\S+)", text),
         "mydoc_reference_no": _find(r"MyDoc\s+Reference\s+No\.?\s*[:\s]+(\S+)", text),
         "date_of_issue": _find(r"Date\s+of\s+Issue[:\s]+(\d{1,2}\s+\w+\s+\d{4})", text),
         "valid_until": _find(r"[Vv]alid\s+until\s+(\d{1,2}\s+\w+\s+\d{4})", text),
-        "eligible_flat_types": _find(r"Eligible\s+Flat\s+Type[s]?\s*\([sS]\)\s*[:\s]+([^\n]+)", text),
-        "application_scheme": _find(r"Application\s+Scheme[:\s]+([^\n]+)", text),
-        "hdb_loan_ceiling": _find_money(r"HDB\s+Loan\s+Ceiling[:\s]+S?\$?\s*([\d,]+)", text),
-        "total_household_income": _find_money(
-            r"Total\s+Household\s+(?:Monthly\s+)?Income\s*[:\s]*([\d,]+\.?\d*)",
+        "eligible_flat_types": _find_label_value(
+            r"Eligible\s+Flat\s+Type\(s\)",
             text,
+            stop_labels=["Application Scheme", "HDB Loan Ceiling", "Income Assessment", "Description"],
         ),
-        "assessment_outcome": _find(r"Assessment\s+Outcome\s*[:\s]+([^\n]+)", text),
+        "application_scheme": _find_label_value(
+            r"Application\s+Scheme",
+            text,
+            stop_labels=["HDB Loan Ceiling", "Income Assessment", "Description", "Applicant 1", "A Singapore Government Agency Website"],
+        ),
+        "hdb_loan_ceiling": _find_money_between_labels(
+            r"HDB\s+Loan\s+Ceiling",
+            text,
+            stop_labels=["Income Assessment", "Description", "Applicant 1", "Total Household Monthly Income"],
+        ),
+        "total_household_income": (
+            _find_money_between_labels(
+                r"Combined\s+Household\s+Monthly\s+Income",
+                text,
+                stop_labels=["Income Ceiling", "Income Ceiling Status", "Combined Annual Income", "Assessment Outcome"],
+            )
+            or _find_money_between_labels(
+                r"Total\s+Household\s+Monthly\s+Income",
+                text,
+                stop_labels=["Income Ceiling", "Income Ceiling Status", "Annual Income", "Assessment Outcome"],
+            )
+            or _find_money(
+                r"Total\s+Household\s+(?:Monthly\s+)?Income\s*[:\s]*([\d,]+\.?\d*)",
+                text,
+            )
+        ),
+        "assessment_outcome": _clean_inline_value(assessment_outcome),
+        "income_ceiling_status": _find_label_value(
+            r"Income\s+Ceiling\s+Status",
+            text,
+            stop_labels=["Combined Annual Income", "Annual Income", "Assessment Outcome", "Housing Grants Eligibility"],
+        ),
+        "combined_annual_income": (
+            _find_money_between_labels(
+                r"Combined\s+Annual\s+Income\s+\(NOA\s+YA\d{4}\)",
+                text,
+                stop_labels=["Assessment Outcome", "Housing Grants Eligibility", "Grant Type"],
+            )
+            or _find_money_between_labels(
+                r"Annual\s+Income\s+\(NOA\s+YA\d{4}\)",
+                text,
+                stop_labels=["Assessment Outcome", "Housing Grants Eligibility", "Grant Type"],
+            )
+        ),
         "total_grants_eligible": _find_money(
             r"Total\s+Grants?\s+Eligible[:\s]+(?:Up\s+to\s+)?S?\$?\s*([\d,]+)",
             text,
@@ -473,6 +632,7 @@ def extract_hfe(text):
     }
 
 
+# what this function does for the service: Handles normalize income result for this service.
 def normalize_income_result(fields):
     variant = fields.get("document_variant")
     if variant == "joint_household_income_statement":
@@ -542,6 +702,7 @@ def normalize_income_result(fields):
     }
 
 
+# what this function does for the service: Handles normalize hfe result for this service.
 def normalize_hfe_result(fields):
     applicants = fields.get("applicants") or []
     main_applicant = applicants[0] if len(applicants) > 0 else {}
@@ -567,6 +728,7 @@ def normalize_hfe_result(fields):
     }
 
 
+# what this function does for the service: Handles  parse optional int for this service.
 def _parse_optional_int(raw_value, field_name):
     value = (raw_value or "").strip()
     if not value:
@@ -578,6 +740,7 @@ def _parse_optional_int(raw_value, field_name):
         return None, f"{field_name} must be an integer."
 
 
+# what this function does for the service: Handles  parse required int for this service.
 def _parse_required_int(raw_value, field_name):
     value = (raw_value or "").strip()
     if not value:
@@ -589,6 +752,7 @@ def _parse_required_int(raw_value, field_name):
         return None, f"{field_name} must be an integer."
 
 
+# what this function does for the service: Handles detect doc type for this service.
 def detect_doc_type(text):
     # Check income variants first so HDB-branded income letters are not
     # mistaken for HFE letters.
@@ -633,6 +797,7 @@ def detect_doc_type(text):
     return "unknown"
 
 
+# what this function does for the service: Handles process document upload for this service.
 def process_document_upload(uploaded_file, application_id):
     filename = uploaded_file.filename or "document.pdf"
     if not filename.lower().endswith(".pdf"):
@@ -687,6 +852,7 @@ def process_document_upload(uploaded_file, application_id):
     }, 200
 
 
+# what this function does for the service: Handles extract for this service.
 @app.route("/extract", methods=["POST"])
 def extract():
     """
@@ -779,6 +945,7 @@ def extract():
     return jsonify(payload), status_code
 
 
+# what this function does for the service: Handles list documents for this service.
 @app.route("/documents", methods=["GET"])
 def list_documents():
     """
@@ -835,6 +1002,7 @@ def list_documents():
     return jsonify({"documents": [document.to_dict() for document in documents]})
 
 
+# what this function does for the service: Handles get document for this service.
 @app.route("/documents/<int:document_id>", methods=["GET"])
 def get_document(document_id):
     """
@@ -884,6 +1052,7 @@ def get_document(document_id):
     return jsonify(row.to_dict())
 
 
+# what this function does for the service: Handles get document file for this service.
 @app.route("/documents/<int:document_id>/file", methods=["GET"])
 def get_document_file(document_id):
     """

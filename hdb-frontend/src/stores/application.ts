@@ -1,37 +1,47 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import { mapMaritalStatus } from '@/services/myinfo'
+import { getCitizenshipStatusFromProfile, getMonthlyIncomeFromProfile, mapMaritalStatus } from '@/services/myinfo'
 import {
-  checkEligibility,
-  createApplicationDraft,
-  getDocument,
-  getApplicationsByNric,
-  getErrorMessage,
-  updateApplicationDraft,
-  updateApplicationStatus,
-  uploadDocument,
-  type EligibilityCheckRequest,
-  type ApplicationDraftRequest,
+  type ApplicationMemberRequest,
+  type ApplyBtoApplicationPayload,
+  type ApplicationMemberRecord,
   type ApplicationRecord,
-  type EligibilityCheckResult,
-  type UploadedDocumentRecord,
+  fetchAvailableFlats,
 } from '@/services/api'
 import type { MyInfoPersona } from '@/data/myinfoPersonas'
 
 const STORAGE_KEY = 'hdb-flat-portal-application'
-const DEFAULT_EXERCISE_ID = 202601
+const DEFAULT_EXERCISE_ID = 6
 
-export type ApplicationStatus = 'draft' | 'processing' | 'balloted' | 'selected'
+export type ApplicationStatus = 'editing' | 'processing' | 'successful' | 'balloted' | 'selected'
+export type HouseholdMemberRole = 'CO_APPLICANT' | 'OCCUPANT'
 
 export interface ApplicationForm {
   fullName: string
   nric: string
   dateOfBirth: string
+  monthlyIncome: string
   contactNumber: string
   email: string
   maritalStatus: string
+  citizenshipStatus: string
   preferredTown: string
   flatType: string
+}
+
+export interface HouseholdMemberForm {
+  id: string
+  memberRole: HouseholdMemberRole
+  fullName: string
+  nric: string
+  dateOfBirth: string
+  monthlyIncome: string
+  relationshipToMain: string
+  citizenshipStatus: string
+  maritalStatus: string
+  contactNumber: string
+  email: string
+  isRetrievedFromMyInfo: boolean
 }
 
 export interface ApplicationDocuments {
@@ -54,33 +64,30 @@ export interface AvailableUnit {
   development: string
 }
 
-export interface DraftPayload {
-  form: ApplicationForm
-  documents: ApplicationDocuments
-  saved_at?: string
-  saved_step?: string
-}
-
 interface PersistedApplicationState {
   form: ApplicationForm
+  mainApplicantProfileLocked: boolean
+  coApplicants: HouseholdMemberForm[]
+  occupiers: HouseholdMemberForm[]
   documents: ApplicationDocuments
   status: ApplicationStatus
-  hasSubmitted: boolean
   queueNumber: string | null
   selectedUnit: AvailableUnit | null
   lastSubmittedAt: string | null
   linkedApplications: ApplicationRecord[]
   linkedNric: string | null
-  currentDraftId: number | null
+  currentApplicationId: number | null
 }
 
 const REQUIRED_SUBMISSION_FIELDS: Array<keyof ApplicationForm> = [
   'fullName',
   'nric',
   'dateOfBirth',
+  'monthlyIncome',
   'contactNumber',
   'email',
   'maritalStatus',
+  'citizenshipStatus',
   'preferredTown',
   'flatType',
 ]
@@ -89,9 +96,11 @@ const fieldLabels: Record<keyof ApplicationForm, string> = {
   fullName: 'Full name',
   nric: 'NRIC',
   dateOfBirth: 'Date of birth',
+  monthlyIncome: 'Monthly income',
   contactNumber: 'Contact number',
   email: 'Email',
   maritalStatus: 'Marital status',
+  citizenshipStatus: 'Citizenship / residency status',
   preferredTown: 'Preferred town',
   flatType: 'Flat type',
 }
@@ -99,10 +108,10 @@ const fieldLabels: Record<keyof ApplicationForm, string> = {
 const townOptions = ['Tengah', 'Kallang/Whampoa', 'Queenstown', 'Punggol'] as const
 
 const developmentByTown: Record<string, string> = {
-  Tengah: 'Tengah GreenVille',
-  'Kallang/Whampoa': 'Kallang Horizon',
-  Queenstown: 'Queenstown Ridges',
-  Punggol: 'Punggol Waterway Terraces',
+  Tengah: 'Tengah Garden Walk',
+  'Kallang/Whampoa': 'Kallang RiverFront',
+  Queenstown: 'Queenstown SkyGrove',
+  Punggol: 'Punggol SeaVista',
 }
 
 const projectIdByTown: Record<string, number> = {
@@ -111,6 +120,10 @@ const projectIdByTown: Record<string, number> = {
   Queenstown: 51,
   Punggol: 21,
 }
+
+const townByProjectId: Record<number, string> = Object.fromEntries(
+  Object.entries(projectIdByTown).map(([town, projectId]) => [projectId, town]),
+) as Record<number, string>
 
 const baseUnitTemplates = [
   { unitNumber: '27-181', floor: 27, facing: 'Open View', sqm: 112, price: 512000 },
@@ -132,9 +145,11 @@ function createDefaultForm(): ApplicationForm {
     fullName: '',
     nric: '',
     dateOfBirth: '',
+    monthlyIncome: '',
     contactNumber: '',
     email: '',
-    maritalStatus: 'Married',
+    maritalStatus: '',
+    citizenshipStatus: '',
     preferredTown: '',
     flatType: '',
   }
@@ -154,6 +169,36 @@ function createDefaultDocumentFiles(): ApplicationDocumentFiles {
   }
 }
 
+function createMemberId(): string {
+  return `member-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function createHouseholdMember(role: HouseholdMemberRole): HouseholdMemberForm {
+  return {
+    id: createMemberId(),
+    memberRole: role,
+    fullName: '',
+    nric: '',
+    dateOfBirth: '',
+    monthlyIncome: '',
+    relationshipToMain: '',
+    citizenshipStatus: '',
+    maritalStatus: '',
+    contactNumber: '',
+    email: '',
+    isRetrievedFromMyInfo: false,
+  }
+}
+
+function mergeHouseholdMember(member: Partial<HouseholdMemberForm> | undefined, role: HouseholdMemberRole) {
+  return {
+    ...createHouseholdMember(role),
+    ...member,
+    memberRole: role,
+    id: member?.id ?? createMemberId(),
+  }
+}
+
 function buildQueueNumber(nric: string): string {
   const digits = nric.replace(/\D/g, '').slice(0, 5) || '20481'
   return `Q${digits}`
@@ -167,6 +212,33 @@ function buildAvailableUnits(preferredTown: string): AvailableUnit[] {
     development,
     ...template,
   }))
+}
+
+function mapFlatServiceRowToUnit(row: {
+  flat_id: number
+  floor_number: number
+  unit_number: string
+  area_sqm: number
+  price: number
+  project_name: string
+}): AvailableUnit {
+  const floorNumber = Number.isFinite(row.floor_number) ? Number(row.floor_number) : 0
+  const unit = String(row.unit_number ?? '').trim()
+  const unitNumber = unit.includes('-')
+    ? unit
+    : unit
+      ? `${String(floorNumber).padStart(2, '0')}-${unit}`
+      : String(row.flat_id)
+
+  return {
+    id: row.flat_id,
+    unitNumber,
+    floor: floorNumber,
+    facing: 'N/A',
+    sqm: Number(row.area_sqm ?? 0),
+    price: Number(row.price ?? 0),
+    development: row.project_name || 'HDB Development',
+  }
 }
 
 function readPersistedState(): PersistedApplicationState | null {
@@ -211,26 +283,86 @@ function sortApplications(applications: ApplicationRecord[]): ApplicationRecord[
   })
 }
 
-function isDraftPayload(payload: unknown): payload is DraftPayload {
-  if (!payload || typeof payload !== 'object') {
-    return false
-  }
-
-  return 'form' in payload || 'documents' in payload
-}
-
 function hasText(value: string): boolean {
   return value.trim().length > 0
+}
+
+function normaliseNric(value: string): string {
+  return value.trim().toUpperCase()
+}
+
+function buildDocumentLabel(documentId: number | null, fallback: string): string {
+  return typeof documentId === 'number' && documentId > 0 ? `${fallback} #${documentId}` : ''
+}
+
+function mapApplicationMemberToForm(member: ApplicationMemberRecord): HouseholdMemberForm {
+  return {
+    id: String(member.member_id),
+    memberRole: member.member_role === 'CO_APPLICANT' ? 'CO_APPLICANT' : 'OCCUPANT',
+    fullName: member.full_name,
+    nric: member.nric_fin,
+    dateOfBirth: member.date_of_birth ?? '',
+    monthlyIncome: member.income_amount !== null ? String(member.income_amount) : '',
+    relationshipToMain: member.relationship_to_main,
+    citizenshipStatus: member.citizenship_status,
+    maritalStatus: member.marital_status ?? '',
+    contactNumber: member.contact_number ?? '',
+    email: member.email ?? '',
+    isRetrievedFromMyInfo: false,
+  }
+}
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
+}
+
+function isPdfSelection(file: File | null, fileName: string): boolean {
+  const normalisedName = fileName.trim().toLowerCase()
+
+  if (file) {
+    return file.type === 'application/pdf' || file.name.trim().toLowerCase().endsWith('.pdf')
+  }
+
+  return normalisedName.endsWith('.pdf')
+}
+
+function parseIncomeAmount(value: string): number | null {
+  const normalised = value
+    .replace(/,/g, '')
+    .replace(/[^0-9.\-]/g, '')
+    .trim()
+  if (!normalised) {
+    return null
+  }
+
+  const parsed = Number.parseFloat(normalised)
+  if (Number.isNaN(parsed) || parsed < 0) {
+    return null
+  }
+
+  return Number.parseFloat(parsed.toFixed(2))
 }
 
 export const useApplicationStore = defineStore('application', () => {
   const persistedState = readPersistedState()
 
-  const form = ref<ApplicationForm>(persistedState?.form ?? createDefaultForm())
-  const documents = ref<ApplicationDocuments>(persistedState?.documents ?? createDefaultDocuments())
+  const form = ref<ApplicationForm>({
+    ...createDefaultForm(),
+    ...(persistedState?.form ?? {}),
+  })
+  const mainApplicantProfileLocked = ref(persistedState?.mainApplicantProfileLocked ?? false)
+  const coApplicants = ref<HouseholdMemberForm[]>(
+    (persistedState?.coApplicants ?? []).map((member) => mergeHouseholdMember(member, 'CO_APPLICANT')),
+  )
+  const occupiers = ref<HouseholdMemberForm[]>(
+    (persistedState?.occupiers ?? []).map((member) => mergeHouseholdMember(member, 'OCCUPANT')),
+  )
+  const documents = ref<ApplicationDocuments>({
+    ...createDefaultDocuments(),
+    ...(persistedState?.documents ?? {}),
+  })
   const documentFiles = ref<ApplicationDocumentFiles>(createDefaultDocumentFiles())
-  const status = ref<ApplicationStatus>(persistedState?.status ?? 'draft')
-  const hasSubmitted = ref<boolean>(persistedState?.hasSubmitted ?? false)
+  const status = ref<ApplicationStatus>(persistedState?.status ?? 'editing')
   const queueNumber = ref<string | null>(persistedState?.queueNumber ?? null)
   const selectedUnit = ref<AvailableUnit | null>(persistedState?.selectedUnit ?? null)
   const lastSubmittedAt = ref<string | null>(persistedState?.lastSubmittedAt ?? null)
@@ -238,44 +370,43 @@ export const useApplicationStore = defineStore('application', () => {
     sortApplications(persistedState?.linkedApplications ?? []),
   )
   const linkedNric = ref<string | null>(persistedState?.linkedNric ?? null)
-  const currentDraftId = ref<number | null>(persistedState?.currentDraftId ?? null)
-  const isLoadingLinkedApplications = ref(false)
-  const linkedApplicationsError = ref('')
-  const isSavingDraft = ref(false)
-  const isPreparingSubmission = ref(false)
-  const draftSaveError = ref('')
-  const draftSaveMessage = ref('')
-  const lastEligibilityResult = ref<EligibilityCheckResult | null>(null)
+  const currentApplicationId = ref<number | null>(persistedState?.currentApplicationId ?? null)
+  const applicationError = ref('')
+  const availableUnitsState = ref<AvailableUnit[]>([])
+  const isLoadingAvailableUnits = ref(false)
 
-  const availableUnits = computed(() => buildAvailableUnits(form.value.preferredTown))
+  const availableUnits = computed(() => {
+    if (availableUnitsState.value.length > 0) {
+      return availableUnitsState.value
+    }
+
+    return buildAvailableUnits(form.value.preferredTown)
+  })
   const developmentName = computed(() => developmentByTown[form.value.preferredTown] ?? 'HDB Development')
   const hasBallotAccess = computed(() => ['balloted', 'selected'].includes(status.value))
   const hasRequiredDocuments = computed(
     () => hasText(documents.value.incomePdfName) && hasText(documents.value.hfeLetterPdfName),
   )
-  const draftApplications = computed(() =>
-    linkedApplications.value.filter((application) => application.application_status === 'DRAFT'),
-  )
   const submittedApplications = computed(() =>
     linkedApplications.value.filter((application) => application.application_status === 'SUBMITTED'),
-  )
-  const pastApplications = computed(() =>
-    linkedApplications.value.filter((application) => application.application_status !== 'DRAFT'),
   )
   const latestApplication = computed(() => linkedApplications.value[0] ?? null)
   const hasExistingApplications = computed(() => linkedApplications.value.length > 0)
   const currentApplication = computed(
-    () => linkedApplications.value.find((application) => application.application_id === currentDraftId.value) ?? null,
+    () =>
+      linkedApplications.value.find((application) => application.application_id === currentApplicationId.value) ?? null,
   )
-  const currentDraft = computed(() =>
-    currentApplication.value?.application_status === 'DRAFT' ? currentApplication.value : null,
+  const isCurrentSubmitted = computed(
+    () =>
+      currentApplication.value?.application_status === 'SUBMITTED' ||
+      currentApplication.value?.application_status === 'SUCCESSFUL' ||
+      status.value === 'processing' ||
+      status.value === 'successful',
   )
-  const firstDraft = computed(() => draftApplications.value[0] ?? null)
   const firstSubmitted = computed(() => submittedApplications.value[0] ?? null)
-  const hasAnyDraft = computed(() => draftApplications.value.length > 0)
   const hasSubmittedApplication = computed(() => submittedApplications.value.length > 0)
-  const isCurrentDraft = computed(() => currentApplication.value?.application_status === 'DRAFT')
-  const isCurrentSubmitted = computed(() => currentApplication.value?.application_status === 'SUBMITTED')
+  const householdMembers = computed(() => [...coApplicants.value, ...occupiers.value])
+  const householdMemberCount = computed(() => householdMembers.value.length)
 
   function persistState() {
     if (typeof window === 'undefined') {
@@ -284,15 +415,17 @@ export const useApplicationStore = defineStore('application', () => {
 
     const payload: PersistedApplicationState = {
       form: form.value,
+      mainApplicantProfileLocked: mainApplicantProfileLocked.value,
+      coApplicants: coApplicants.value,
+      occupiers: occupiers.value,
       documents: documents.value,
       status: status.value,
-      hasSubmitted: hasSubmitted.value,
       queueNumber: queueNumber.value,
       selectedUnit: selectedUnit.value,
       lastSubmittedAt: lastSubmittedAt.value,
       linkedApplications: linkedApplications.value,
       linkedNric: linkedNric.value,
-      currentDraftId: currentDraftId.value,
+      currentApplicationId: currentApplicationId.value,
     }
 
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
@@ -301,192 +434,364 @@ export const useApplicationStore = defineStore('application', () => {
   watch(
     [
       form,
+      mainApplicantProfileLocked,
+      coApplicants,
+      occupiers,
       documents,
       status,
-      hasSubmitted,
       queueNumber,
       selectedUnit,
       lastSubmittedAt,
       linkedApplications,
       linkedNric,
-      currentDraftId,
+      currentApplicationId,
     ],
     persistState,
     { deep: true },
   )
 
-  function upsertApplication(application: ApplicationRecord) {
-    linkedApplications.value = sortApplications([
-      ...linkedApplications.value.filter((existing) => existing.application_id !== application.application_id),
-      application,
-    ])
+  watch([form, coApplicants, occupiers], () => {
+    applicationError.value = ''
+  }, { deep: true })
+
+  function clearLocalWorkflowState() {
+    status.value = 'editing'
+    queueNumber.value = null
+    selectedUnit.value = null
+    lastSubmittedAt.value = null
+    availableUnitsState.value = []
+  }
+
+  function clearSubmissionCache() {
+    applicationError.value = ''
   }
 
   function setLinkedApplications(nric: string, applications: ApplicationRecord[]) {
-    linkedNric.value = nric.trim().toUpperCase()
+    linkedNric.value = normaliseNric(nric)
     linkedApplications.value = sortApplications(applications)
-    linkedApplicationsError.value = ''
 
     if (
-      currentDraftId.value !== null &&
-      !linkedApplications.value.some((application) => application.application_id === currentDraftId.value)
+      currentApplicationId.value !== null &&
+      !linkedApplications.value.some((application) => application.application_id === currentApplicationId.value)
     ) {
-      currentDraftId.value = null
+      currentApplicationId.value = null
     }
+  }
+
+  function replaceLinkedApplicationsForNric(nric: string, applications: ApplicationRecord[]) {
+    setLinkedApplications(nric, applications)
   }
 
   function clearLinkedApplications() {
     linkedApplications.value = []
     linkedNric.value = null
-    linkedApplicationsError.value = ''
-    currentDraftId.value = null
+    currentApplicationId.value = null
   }
 
-  async function loadLinkedApplications(nric: string) {
-    const formattedNric = nric.trim().toUpperCase()
+  function syncSessionApplications(nric: string) {
+    const formattedNric = normaliseNric(nric)
     if (!formattedNric) {
       clearLinkedApplications()
       return []
     }
 
-    isLoadingLinkedApplications.value = true
-
-    try {
-      const payload = await getApplicationsByNric(formattedNric)
-      setLinkedApplications(formattedNric, payload.applications)
-      return payload.applications
-    } catch (error) {
-      linkedApplicationsError.value = getErrorMessage(
-        error,
-        'We could not load your application history right now.',
-      )
+    if (linkedNric.value && linkedNric.value !== formattedNric) {
       linkedApplications.value = []
-      linkedNric.value = formattedNric
-      return []
-    } finally {
-      isLoadingLinkedApplications.value = false
+      currentApplicationId.value = null
     }
+
+    linkedNric.value = formattedNric
+
+    if (
+      currentApplicationId.value !== null &&
+      !linkedApplications.value.some((application) => application.application_id === currentApplicationId.value)
+    ) {
+      currentApplicationId.value = null
+    }
+
+    return linkedApplications.value
+  }
+
+  function storeApplicationRecord(application: ApplicationRecord) {
+    const formattedNric = normaliseNric(application.main_applicant_nric)
+
+    if (linkedNric.value && linkedNric.value !== formattedNric) {
+      linkedApplications.value = []
+      currentApplicationId.value = null
+    }
+
+    setLinkedApplications(formattedNric, [
+      ...linkedApplications.value.filter((existing) => existing.application_id !== application.application_id),
+      application,
+    ])
+  }
+
+  function beginNewApplication() {
+    const preservedNric = normaliseNric(form.value.nric)
+    const preservedName = form.value.fullName
+
+    form.value = {
+      ...createDefaultForm(),
+      nric: preservedNric,
+      fullName: preservedName,
+    }
+    mainApplicantProfileLocked.value = false
+    coApplicants.value = []
+    occupiers.value = []
+    documents.value = createDefaultDocuments()
+    documentFiles.value = createDefaultDocumentFiles()
+    currentApplicationId.value = null
+    clearSubmissionCache()
+    clearLocalWorkflowState()
   }
 
   function startApplicationLogin(nric: string, name = '') {
+    const formattedNric = normaliseNric(nric)
+
     form.value = {
       ...createDefaultForm(),
-      nric: nric.trim().toUpperCase(),
+      nric: formattedNric,
       fullName: name || form.value.fullName,
     }
+    mainApplicantProfileLocked.value = false
+    coApplicants.value = []
+    occupiers.value = []
     documents.value = createDefaultDocuments()
     documentFiles.value = createDefaultDocumentFiles()
-    status.value = 'draft'
-    hasSubmitted.value = false
-    queueNumber.value = null
-    selectedUnit.value = null
-    lastSubmittedAt.value = null
-    currentDraftId.value = null
-    lastEligibilityResult.value = null
-    draftSaveError.value = ''
-    draftSaveMessage.value = ''
+    currentApplicationId.value = null
+    clearSubmissionCache()
+    clearLocalWorkflowState()
+    syncSessionApplications(formattedNric)
   }
 
-  function fillFromMyInfo(persona: MyInfoPersona) {
+  function addHouseholdMember(role: HouseholdMemberRole) {
+    if (role === 'CO_APPLICANT' && coApplicants.value.length >= 1) {
+      return coApplicants.value[0]
+    }
+
+    const member = createHouseholdMember(role)
+
+    if (role === 'CO_APPLICANT') {
+      coApplicants.value = [...coApplicants.value, member]
+    } else {
+      occupiers.value = [...occupiers.value, member]
+    }
+
+    clearSubmissionCache()
+    return member
+  }
+
+  function removeHouseholdMember(role: HouseholdMemberRole, memberId: string) {
+    if (role === 'CO_APPLICANT') {
+      coApplicants.value = coApplicants.value.filter((member) => member.id !== memberId)
+    } else {
+      occupiers.value = occupiers.value.filter((member) => member.id !== memberId)
+    }
+
+    clearSubmissionCache()
+  }
+
+  function fillMainApplicantFromMyInfo(persona: MyInfoPersona) {
     form.value.fullName = persona.name?.value ?? form.value.fullName
+    form.value.nric = normaliseNric(form.value.nric || persona.uinfin?.value || '')
     form.value.dateOfBirth = persona.dob?.value ?? ''
+    form.value.monthlyIncome = getMonthlyIncomeFromProfile(persona)
     form.value.contactNumber = persona.mobileno?.nbr?.value ?? ''
     form.value.email = persona.email?.value ?? ''
     form.value.maritalStatus = mapMaritalStatus(persona.marital?.code)
+    form.value.citizenshipStatus = getCitizenshipStatusFromProfile(persona)
+    mainApplicantProfileLocked.value = true
+    clearSubmissionCache()
   }
 
-  function buildEligibilityPayload(
-    application: ApplicationRecord,
-    incomeDocument: UploadedDocumentRecord,
-  ): EligibilityCheckRequest {
-    return {
-      application: {
-        application_id: application.application_id,
-        exercise_id: application.exercise_id,
-        project_id: application.project_id,
-        main_applicant_nric: form.value.nric.trim().toUpperCase(),
-        full_name: form.value.fullName,
-        date_of_birth: form.value.dateOfBirth,
-        contact_number: form.value.contactNumber,
-        email: form.value.email,
-        marital_status: form.value.maritalStatus,
-        preferred_town: form.value.preferredTown,
-        flat_type: form.value.flatType,
-      },
-      income_document: {
-        document_id: incomeDocument.document_id,
-        document_type: incomeDocument.document_type,
-        fields: incomeDocument.fields ?? {},
-      },
+  function fillHouseholdMemberFromMyInfo(memberId: string, persona: MyInfoPersona) {
+    const applyProfile = (member: HouseholdMemberForm) => {
+      member.fullName = persona.name?.value ?? member.fullName
+      member.nric = normaliseNric(member.nric || persona.uinfin?.value || '')
+      member.dateOfBirth = persona.dob?.value ?? ''
+      member.monthlyIncome = getMonthlyIncomeFromProfile(persona)
+      member.contactNumber = persona.mobileno?.nbr?.value ?? member.contactNumber
+      member.email = persona.email?.value ?? member.email
+      member.maritalStatus = mapMaritalStatus(persona.marital?.code)
+      member.citizenshipStatus = getCitizenshipStatusFromProfile(persona)
+      member.isRetrievedFromMyInfo = true
+      clearSubmissionCache()
+    }
+
+    const coApplicant = coApplicants.value.find((member) => member.id === memberId)
+    if (coApplicant) {
+      applyProfile(coApplicant)
+      return
+    }
+
+    const occupier = occupiers.value.find((member) => member.id === memberId)
+    if (occupier) {
+      applyProfile(occupier)
     }
   }
 
-  function buildDraftRequest(
-    savedStep = 'details',
-    overrides: {
-      income_document_id?: number | null
-      hfe_document_id?: number | null
-    } = {},
-  ): ApplicationDraftRequest {
+  function buildApplicationMembersPayload(): ApplicationMemberRequest[] {
+    return [
+      {
+        member_role: 'MAIN_APPLICANT',
+        nric_fin: normaliseNric(form.value.nric),
+        full_name: form.value.fullName.trim(),
+        relationship_to_main: 'Self',
+        date_of_birth: form.value.dateOfBirth,
+        citizenship_status: form.value.citizenshipStatus,
+        marital_status: form.value.maritalStatus || null,
+        contact_number: form.value.contactNumber.trim(),
+        email: form.value.email.trim(),
+        income_amount: parseIncomeAmount(form.value.monthlyIncome),
+      },
+      ...coApplicants.value.map((member) => ({
+        member_role: 'CO_APPLICANT' as const,
+        nric_fin: normaliseNric(member.nric),
+        full_name: member.fullName.trim(),
+        relationship_to_main: member.relationshipToMain,
+        date_of_birth: member.dateOfBirth,
+        citizenship_status: member.citizenshipStatus,
+        marital_status: member.maritalStatus || null,
+        contact_number: member.contactNumber.trim(),
+        email: member.email.trim(),
+        income_amount: parseIncomeAmount(member.monthlyIncome),
+      })),
+      ...occupiers.value.map((member) => ({
+        member_role: 'OCCUPANT' as const,
+        nric_fin: normaliseNric(member.nric),
+        full_name: member.fullName.trim(),
+        relationship_to_main: member.relationshipToMain,
+        date_of_birth: member.dateOfBirth,
+        citizenship_status: member.citizenshipStatus,
+        marital_status: member.maritalStatus || null,
+        contact_number: member.contactNumber.trim(),
+        email: member.email.trim(),
+        income_amount: parseIncomeAmount(member.monthlyIncome),
+      })),
+    ]
+  }
+
+  function buildApplyBtoApplicationPayload(): ApplyBtoApplicationPayload {
     return {
-      main_applicant_nric: form.value.nric.trim().toUpperCase(),
+      main_applicant_nric: normaliseNric(form.value.nric),
       exercise_id: DEFAULT_EXERCISE_ID,
       project_id: projectIdByTown[form.value.preferredTown] ?? 0,
-      flat_type: form.value.flatType || 'Draft',
-      income_document_id:
-        overrides.income_document_id !== undefined
-          ? overrides.income_document_id
-          : currentApplication.value?.income_document_id ?? null,
-      hfe_document_id:
-        overrides.hfe_document_id !== undefined
-          ? overrides.hfe_document_id
-          : currentApplication.value?.hfe_document_id ?? null,
-      draft_payload: {
-        form: { ...form.value, nric: form.value.nric.trim().toUpperCase() },
-        documents: { ...documents.value },
-        saved_at: new Date().toISOString(),
-        saved_step: savedStep,
-      },
+      flat_type: form.value.flatType,
+      members: buildApplicationMembersPayload(),
     }
   }
 
-  function openDraft(application: ApplicationRecord) {
-    currentDraftId.value = application.application_id
-    status.value = application.application_status === 'DRAFT' ? 'draft' : 'processing'
-    hasSubmitted.value = application.application_status !== 'DRAFT'
-    queueNumber.value = null
-    selectedUnit.value = null
-    lastSubmittedAt.value = application.submitted_at
+  function getApplyBtoInitiationPayload() {
+    applicationError.value = ''
 
-    const payload = isDraftPayload(application.draft_payload) ? application.draft_payload : null
-    if (payload?.form) {
-      form.value = {
-        ...createDefaultForm(),
-        ...payload.form,
-        nric: payload.form.nric?.trim().toUpperCase() || application.main_applicant_nric,
-      }
-    } else {
-      form.value = {
-        ...createDefaultForm(),
-        nric: application.main_applicant_nric,
-        flatType: application.flat_type === 'Draft' ? '' : application.flat_type,
-      }
+    if (isCurrentSubmitted.value) {
+      applicationError.value = 'This application has already been submitted.'
+      return null
     }
 
-    documents.value = payload?.documents
-      ? {
-          ...createDefaultDocuments(),
-          ...payload.documents,
-        }
-      : createDefaultDocuments()
+    if (firstSubmitted.value) {
+      applicationError.value =
+        'You already have a submitted application on file. Please review that application instead.'
+      return null
+    }
 
-    documentFiles.value = createDefaultDocumentFiles()
-    draftSaveError.value = ''
-    draftSaveMessage.value = ''
+    if (!validateApplicationDetails()) {
+      return null
+    }
+
+    const incomeDocument = documentFiles.value.incomePdfFile
+    const hfeDocument = documentFiles.value.hfeLetterPdfFile
+
+    if (!incomeDocument || !hfeDocument) {
+      applicationError.value = 'Please attach both PDFs again before continuing to payment.'
+      return null
+    }
+
+    return {
+      application: buildApplyBtoApplicationPayload(),
+      incomeDocument,
+      hfeDocument,
+    }
+  }
+
+  function getMemberLabel(role: HouseholdMemberRole, index: number) {
+    return role === 'CO_APPLICANT' ? `Co-applicant ${index + 1}` : `Occupier ${index + 1}`
+  }
+
+  function validateHouseholdMembers(): string[] {
+    const errors: string[] = []
+    const seenNrics = new Set<string>()
+
+    const mainApplicantNric = normaliseNric(form.value.nric)
+    if (mainApplicantNric) {
+      seenNrics.add(mainApplicantNric)
+    }
+
+    const validateMemberCollection = (members: HouseholdMemberForm[], role: HouseholdMemberRole) => {
+      members.forEach((member, index) => {
+        const label = getMemberLabel(role, index)
+
+        if (!hasText(member.fullName)) {
+          errors.push(`${label}: full name is required.`)
+        }
+
+        if (!hasText(member.nric)) {
+          errors.push(`${label}: NRIC / FIN is required.`)
+        } else {
+          const memberNric = normaliseNric(member.nric)
+          if (seenNrics.has(memberNric)) {
+            errors.push(`${label}: NRIC / FIN must be unique within the application.`)
+          } else {
+            seenNrics.add(memberNric)
+          }
+        }
+
+        if (!hasText(member.dateOfBirth)) {
+          errors.push(`${label}: date of birth is required.`)
+        }
+
+        if (!hasText(member.monthlyIncome)) {
+          errors.push(`${label}: monthly income is required.`)
+        } else if (parseIncomeAmount(member.monthlyIncome) === null) {
+          errors.push(`${label}: monthly income must be a valid non-negative number.`)
+        }
+
+        if (!hasText(member.relationshipToMain)) {
+          errors.push(`${label}: relationship to main applicant is required.`)
+        }
+
+        if (!hasText(member.citizenshipStatus)) {
+          errors.push(`${label}: citizenship / residency status is required.`)
+        }
+
+        if (!hasText(member.maritalStatus)) {
+          errors.push(`${label}: marital status is required.`)
+        }
+
+        if (!hasText(member.contactNumber)) {
+          errors.push(`${label}: contact number is required.`)
+        }
+
+        if (!hasText(member.email)) {
+          errors.push(`${label}: email is required.`)
+        } else if (!isValidEmail(member.email)) {
+          errors.push(`${label}: email must be a valid email address.`)
+        }
+      })
+    }
+
+    validateMemberCollection(coApplicants.value, 'CO_APPLICANT')
+    validateMemberCollection(occupiers.value, 'OCCUPANT')
+
+    return errors
   }
 
   function getSubmissionValidationErrors(): string[] {
     const errors: string[] = []
+
+    if (coApplicants.value.length > 1) {
+      errors.push('Only one co-applicant can be added to this application.')
+    }
 
     for (const fieldName of REQUIRED_SUBMISSION_FIELDS) {
       if (!hasText(form.value[fieldName])) {
@@ -494,203 +799,110 @@ export const useApplicationStore = defineStore('application', () => {
       }
     }
 
+    if (hasText(form.value.email) && !isValidEmail(form.value.email)) {
+      errors.push('Enter a valid email address before submission.')
+    }
+
+    if (hasText(form.value.monthlyIncome) && parseIncomeAmount(form.value.monthlyIncome) === null) {
+      errors.push('Main applicant monthly income must be a valid non-negative number.')
+    }
+
+    errors.push(...validateHouseholdMembers())
+
     if (!hasRequiredDocuments.value) {
       errors.push('Both the income PDF and HFE letter PDF must be selected before submission.')
     }
 
-    const hasStoredIncomeDocument =
-      typeof currentApplication.value?.income_document_id === 'number' && currentApplication.value.income_document_id > 0
-    const hasStoredHfeDocument =
-      typeof currentApplication.value?.hfe_document_id === 'number' && currentApplication.value.hfe_document_id > 0
-
-    if (!hasStoredIncomeDocument && !documentFiles.value.incomePdfFile) {
-      errors.push('Please attach your income PDF before submission.')
+    if (
+      hasText(documents.value.incomePdfName) &&
+      !isPdfSelection(documentFiles.value.incomePdfFile, documents.value.incomePdfName)
+    ) {
+      errors.push('Income document must be uploaded as a PDF file.')
     }
 
-    if (!hasStoredHfeDocument && !documentFiles.value.hfeLetterPdfFile) {
-      errors.push('Please attach your HFE letter PDF before submission.')
+    if (
+      hasText(documents.value.hfeLetterPdfName) &&
+      !isPdfSelection(documentFiles.value.hfeLetterPdfFile, documents.value.hfeLetterPdfName)
+    ) {
+      errors.push('HFE letter must be uploaded as a PDF file.')
+    }
+
+    if (!documentFiles.value.incomePdfFile || !documentFiles.value.hfeLetterPdfFile) {
+      errors.push('Please attach both PDFs before submission.')
     }
 
     return errors
   }
 
-  async function saveDraft(savedStep = 'details') {
-    draftSaveError.value = ''
-    draftSaveMessage.value = ''
-
-    if (currentDraftId.value === null) {
-      draftSaveMessage.value = 'Draft saved on this device.'
-      return null
-    }
-
-    isSavingDraft.value = true
-
-    try {
-      const application = await updateApplicationDraft(currentDraftId.value, buildDraftRequest(savedStep))
-      upsertApplication(application)
-      draftSaveMessage.value = application.application_status === 'SUBMITTED' ? 'Application updated.' : 'Draft saved.'
-      return application
-    } catch (error) {
-      draftSaveError.value = getErrorMessage(error, 'Unable to save your draft right now.')
-      return null
-    } finally {
-      isSavingDraft.value = false
-    }
-  }
-
-  async function ensureBackendDraft() {
-    const payload = buildDraftRequest('payment')
-    const application =
-      currentDraftId.value !== null
-        ? await updateApplicationDraft(currentDraftId.value, payload)
-        : await createApplicationDraft(payload)
-
-    currentDraftId.value = application.application_id
-    upsertApplication(application)
-    return application
-  }
-
-  async function uploadSubmissionDocuments(applicationId: number) {
-    let incomeDocumentId = currentApplication.value?.income_document_id ?? null
-    let hfeDocumentId = currentApplication.value?.hfe_document_id ?? null
-    let incomeDocumentRecord: UploadedDocumentRecord | null = null
-
-    if (documentFiles.value.incomePdfFile) {
-      const incomeDocument = await uploadDocument(documentFiles.value.incomePdfFile, applicationId)
-      if (incomeDocument.document_type !== 'income') {
-        throw new Error('The uploaded income PDF was not recognised as an income document.')
-      }
-      incomeDocumentId = incomeDocument.document_id
-      incomeDocumentRecord = incomeDocument
-    } else if (incomeDocumentId !== null) {
-      incomeDocumentRecord = await getDocument(incomeDocumentId)
-    }
-
-    if (documentFiles.value.hfeLetterPdfFile) {
-      const hfeDocument = await uploadDocument(documentFiles.value.hfeLetterPdfFile, applicationId)
-      if (hfeDocument.document_type !== 'hfe') {
-        throw new Error('The uploaded HFE letter PDF was not recognised as an HFE document.')
-      }
-      hfeDocumentId = hfeDocument.document_id
-    }
-
-    if (incomeDocumentId === null || hfeDocumentId === null || incomeDocumentRecord === null) {
-      throw new Error('Application details and OCR results must be available before eligibility can be checked.')
-    }
-
-    return {
-      incomeDocumentId,
-      hfeDocumentId,
-      incomeDocumentRecord,
-    }
-  }
-
-  async function prepareSubmission() {
-    draftSaveError.value = ''
-    draftSaveMessage.value = ''
-    lastEligibilityResult.value = null
-
-    if (isCurrentSubmitted.value) {
-      draftSaveError.value = 'This application has already been submitted.'
-      return null
-    }
-
-    if (firstSubmitted.value && currentDraftId.value !== firstSubmitted.value.application_id) {
-      draftSaveError.value = 'You already have a submitted application. Please update that one instead.'
-      return null
-    }
+  function validateApplicationDetails() {
+    applicationError.value = ''
 
     const validationErrors = getSubmissionValidationErrors()
     if (validationErrors.length > 0) {
-      draftSaveError.value = validationErrors[0] ?? 'Please complete all required fields before submission.'
-      return null
+      applicationError.value = validationErrors[0] ?? 'Please complete all required fields before submission.'
+      return false
     }
 
-    isPreparingSubmission.value = true
-
-    try {
-      const draftApplication = await ensureBackendDraft()
-      const { incomeDocumentId, hfeDocumentId, incomeDocumentRecord } = await uploadSubmissionDocuments(
-        draftApplication.application_id,
-      )
-      const updatedApplication = await updateApplicationDraft(
-        draftApplication.application_id,
-        buildDraftRequest('payment', {
-          income_document_id: incomeDocumentId,
-          hfe_document_id: hfeDocumentId,
-        }),
-      )
-
-      currentDraftId.value = updatedApplication.application_id
-      upsertApplication(updatedApplication)
-      documentFiles.value = createDefaultDocumentFiles()
-
-      const eligibility = await checkEligibility(buildEligibilityPayload(updatedApplication, incomeDocumentRecord))
-      lastEligibilityResult.value = eligibility
-      draftSaveMessage.value = 'Application prepared for payment.'
-
-      return {
-        application: updatedApplication,
-        eligibility,
-      }
-    } catch (error) {
-      draftSaveError.value = getErrorMessage(error, 'Unable to prepare your application for submission.')
-      return null
-    } finally {
-      isPreparingSubmission.value = false
-    }
+    return true
   }
 
-  function resetDraftData() {
-    const preservedNric = form.value.nric.trim().toUpperCase()
+  function openApplication(application: ApplicationRecord) {
+    storeApplicationRecord(application)
+
+    const openingCurrentApplication = currentApplicationId.value === application.application_id
+
+    currentApplicationId.value = application.application_id
+    if (!openingCurrentApplication) {
+      clearLocalWorkflowState()
+      if (application.application_status === 'SUCCESSFUL') {
+        status.value = 'successful'
+      } else if (application.application_status === 'SUBMITTED') {
+        status.value = 'processing'
+      } else {
+        status.value = 'editing'
+      }
+    }
+
+    lastSubmittedAt.value = application.submitted_at
+
+    const mainApplicantMember =
+      application.members.find((member) => member.member_role === 'MAIN_APPLICANT') ?? application.members[0]
+
     form.value = {
       ...createDefaultForm(),
-      nric: preservedNric,
+      fullName: mainApplicantMember?.full_name ?? '',
+      nric: application.main_applicant_nric,
+      dateOfBirth: mainApplicantMember?.date_of_birth ?? '',
+      monthlyIncome: mainApplicantMember?.income_amount !== null && mainApplicantMember?.income_amount !== undefined
+        ? String(mainApplicantMember.income_amount)
+        : '',
+      contactNumber: mainApplicantMember?.contact_number ?? '',
+      email: mainApplicantMember?.email ?? '',
+      maritalStatus: mainApplicantMember?.marital_status ?? '',
+      citizenshipStatus: mainApplicantMember?.citizenship_status ?? '',
+      preferredTown: townByProjectId[application.project_id] ?? '',
+      flatType: application.flat_type,
     }
-    documents.value = createDefaultDocuments()
+    mainApplicantProfileLocked.value = false
+
+    coApplicants.value = application.members
+      .filter((member) => member.member_role === 'CO_APPLICANT')
+      .map(mapApplicationMemberToForm)
+    occupiers.value = application.members
+      .filter((member) => member.member_role === 'OCCUPANT')
+      .map(mapApplicationMemberToForm)
+
+    documents.value = {
+      incomePdfName: buildDocumentLabel(application.income_document_id, 'Income document'),
+      hfeLetterPdfName: buildDocumentLabel(application.hfe_document_id, 'HFE letter'),
+    }
+
     documentFiles.value = createDefaultDocumentFiles()
-    status.value = 'draft'
-    hasSubmitted.value = false
-    queueNumber.value = null
-    selectedUnit.value = null
-    lastSubmittedAt.value = null
-    lastEligibilityResult.value = null
-    draftSaveError.value = ''
-    draftSaveMessage.value = ''
+    clearSubmissionCache()
   }
 
-  async function submitApplication() {
-    if (isCurrentSubmitted.value) {
-      draftSaveError.value = 'You already have a submitted application open.'
-      return null
-    }
-
-    if (firstSubmitted.value && currentDraftId.value !== firstSubmitted.value.application_id) {
-      draftSaveError.value = 'You already have a submitted application. Please update that one instead.'
-      return null
-    }
-
-    if (currentDraftId.value === null) {
-      draftSaveError.value = 'No application is ready for submission yet.'
-      return null
-    }
-
-    try {
-      const application = await updateApplicationStatus(currentDraftId.value, 'SUBMITTED')
-      hasSubmitted.value = true
-      status.value = 'processing'
-      queueNumber.value = null
-      selectedUnit.value = null
-      lastSubmittedAt.value = application.submitted_at ?? new Date().toISOString()
-      upsertApplication(application)
-      return application
-    } catch (error) {
-      draftSaveError.value = getErrorMessage(
-        error,
-        'Your payment succeeded, but we could not update the application status.',
-      )
-      return null
-    }
+  function resetFormProgress() {
+    beginNewApplication()
   }
 
   function markBalloted() {
@@ -701,6 +913,42 @@ export const useApplicationStore = defineStore('application', () => {
   function reserveUnit(unit: AvailableUnit) {
     selectedUnit.value = unit
     status.value = 'selected'
+  }
+
+  async function loadAvailableUnits() {
+    const preferredTown = form.value.preferredTown
+    if (!hasText(preferredTown)) {
+      availableUnitsState.value = []
+      return
+    }
+
+    const params: { town?: string; flat_type?: string; project_id?: number } = {
+      town: preferredTown,
+    }
+
+    const projectId = projectIdByTown[preferredTown]
+    if (projectId) {
+      params.project_id = projectId
+    }
+
+    if (hasText(form.value.flatType)) {
+      params.flat_type = form.value.flatType
+    }
+
+    isLoadingAvailableUnits.value = true
+    try {
+      const { status: httpStatus, data } = await fetchAvailableFlats(params)
+      if (httpStatus === 200 && Array.isArray(data.data)) {
+        availableUnitsState.value = data.data.map((row) => mapFlatServiceRowToUnit(row))
+        return
+      }
+
+      availableUnitsState.value = []
+    } catch {
+      availableUnitsState.value = []
+    } finally {
+      isLoadingAvailableUnits.value = false
+    }
   }
 
   function setDocument(documentKey: 'incomePdfName' | 'hfeLetterPdfName', file: File | null) {
@@ -716,20 +964,19 @@ export const useApplicationStore = defineStore('application', () => {
         ? { incomePdfFile: file }
         : { hfeLetterPdfFile: file }),
     }
+
+    clearSubmissionCache()
   }
 
   function resetApplication() {
     form.value = createDefaultForm()
+    mainApplicantProfileLocked.value = false
+    coApplicants.value = []
+    occupiers.value = []
     documents.value = createDefaultDocuments()
     documentFiles.value = createDefaultDocumentFiles()
-    status.value = 'draft'
-    hasSubmitted.value = false
-    queueNumber.value = null
-    selectedUnit.value = null
-    lastSubmittedAt.value = null
-    lastEligibilityResult.value = null
-    draftSaveError.value = ''
-    draftSaveMessage.value = ''
+    clearSubmissionCache()
+    clearLocalWorkflowState()
     clearLinkedApplications()
 
     if (typeof window !== 'undefined') {
@@ -740,51 +987,49 @@ export const useApplicationStore = defineStore('application', () => {
   return {
     townOptions,
     form,
+    mainApplicantProfileLocked,
+    coApplicants,
+    occupiers,
+    householdMembers,
+    householdMemberCount,
     documents,
     status,
-    hasSubmitted,
     queueNumber,
     selectedUnit,
     lastSubmittedAt,
     linkedApplications,
     linkedNric,
-    currentDraftId,
-    currentDraft,
+    currentApplicationId,
     currentApplication,
-    firstDraft,
     firstSubmitted,
-    isLoadingLinkedApplications,
-    linkedApplicationsError,
-    isSavingDraft,
-    isPreparingSubmission,
-    draftSaveError,
-    draftSaveMessage,
-    draftApplications,
-    pastApplications,
+    submittedApplications,
+    applicationError,
     latestApplication,
     hasExistingApplications,
-    hasAnyDraft,
     hasSubmittedApplication,
-    isCurrentDraft,
     isCurrentSubmitted,
-    submittedApplications,
     availableUnits,
+    isLoadingAvailableUnits,
     developmentName,
     hasBallotAccess,
     hasRequiredDocuments,
-    lastEligibilityResult,
-    loadLinkedApplications,
-    setLinkedApplications,
+    syncSessionApplications,
+    replaceLinkedApplicationsForNric,
+    storeApplicationRecord,
     clearLinkedApplications,
+    beginNewApplication,
     startApplicationLogin,
-    fillFromMyInfo,
-    openDraft,
-    saveDraft,
-    prepareSubmission,
-    resetDraftData,
-    submitApplication,
+    addHouseholdMember,
+    removeHouseholdMember,
+    fillMainApplicantFromMyInfo,
+    fillHouseholdMemberFromMyInfo,
+    validateApplicationDetails,
+    getApplyBtoInitiationPayload,
+    openApplication,
+    resetFormProgress,
     markBalloted,
     reserveUnit,
+    loadAvailableUnits,
     setDocument,
     resetApplication,
   }
