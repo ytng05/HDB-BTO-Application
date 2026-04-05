@@ -268,6 +268,15 @@ def fetch_payment_status(merchant_txn_ref, refresh=True):
     return response
 
 
+#  Handles force payment success for demo mode for this service.
+def force_payment_success_for_demo(merchant_txn_ref):
+    response = requests.post(
+        f"{NETS_PAYMENT_SERVICE_URL}/payment/demo-force-success/{merchant_txn_ref}",
+        timeout=REQUEST_TIMEOUT,
+    )
+    return response
+
+
 #  Handles build application create payload for this service.
 def build_application_create_payload(application):
     return {
@@ -466,27 +475,34 @@ def finalise_workflow(workflow):
         return cache_workflow_result(workflow, result, 402)
 
     if payment_response.status_code != 200 or payment_status != "success":
-        message = extract_error_message(payment_response, "Unable to confirm the payment outcome.")
-        workflow["stage"] = STAGE_ERROR
+        resolved_payment_status = "cancelled" if payment_status == "cancelled" else "failed"
+        message = payment_data.get("message") or extract_error_message(
+            payment_response,
+            "Payment did not complete successfully.",
+        )
+        workflow["payment_status"] = resolved_payment_status
+        workflow["stage"] = STAGE_PAYMENT_FAILED
         workflow["last_error"] = message
         workflow["updated_at"] = now_iso()
-        logger.error(
-            "Unable to confirm payment outcome | %s",
+        logger.warning(
+            "Treating unresolved payment outcome as payment failure | %s",
             json.dumps(
                 {
                     "merchant_txn_ref": workflow["merchant_txn_ref"],
                     "payment_status": payment_status,
+                    "resolved_payment_status": resolved_payment_status,
                     "message": message,
                 },
                 sort_keys=True,
             ),
         )
-        return {
+        result = {
             "merchant_txn_ref": workflow["merchant_txn_ref"],
             "stage": workflow["stage"],
-            "payment_status": payment_status,
+            "payment_status": resolved_payment_status,
             "message": message,
-        }, 502
+        }
+        return cache_workflow_result(workflow, result, 402)
 
     workflow["stage"] = STAGE_PAYMENT_SUCCESS
     workflow["last_error"] = None
@@ -798,6 +814,66 @@ def complete_apply_bto(merchant_txn_ref):
             json.dumps({"merchant_txn_ref": merchant_txn_ref}, sort_keys=True),
         )
         return jsonify({"error": "Apply BTO workflow not found for this merchant transaction reference."}), 404
+
+    payload, status_code = finalise_workflow(workflow)
+    return jsonify(payload), status_code
+
+
+#  Handles demo payment success override for this service.
+@app.route("/apply-bto/demo-force-success/<merchant_txn_ref>", methods=["POST"])
+def demo_force_apply_bto_success(merchant_txn_ref):
+    """
+    Force a payment success result for demo mode and complete the workflow
+    ---
+    tags:
+      - Apply BTO
+    summary: Force a successful payment outcome for demo use
+    description: |
+      Marks the payment as successful in the NETS wrapper for the supplied
+      merchant transaction reference, clears any cached failed result, and then
+      runs the normal Apply BTO completion flow.
+    parameters:
+      - in: path
+        name: merchant_txn_ref
+        required: true
+        schema:
+          type: string
+    responses:
+      200:
+        description: Workflow completed after forcing payment success.
+      404:
+        description: Workflow not found.
+      502:
+        description: Demo payment override failed.
+    """
+    log_event("Received Apply BTO demo success request", merchant_txn_ref=merchant_txn_ref)
+
+    workflow = workflows.get(merchant_txn_ref)
+    if workflow is None:
+        logger.warning(
+            "Apply BTO workflow not found during demo success request | %s",
+            json.dumps({"merchant_txn_ref": merchant_txn_ref}, sort_keys=True),
+        )
+        return jsonify({"error": "Apply BTO workflow not found for this merchant transaction reference."}), 404
+
+    try:
+        payment_response = force_payment_success_for_demo(merchant_txn_ref)
+    except requests.RequestException as exc:
+        return jsonify({"error": f"Unable to force payment success in demo mode: {exc}"}), 502
+
+    if payment_response.status_code != 200:
+        message = extract_error_message(
+            payment_response,
+            "Unable to force payment success in demo mode.",
+        )
+        return jsonify({"error": message}), 502
+
+    workflow["result"] = None
+    workflow["result_status_code"] = None
+    workflow["last_error"] = None
+    workflow["payment_status"] = "pending"
+    workflow["stage"] = STAGE_PAYMENT_PENDING
+    workflow["updated_at"] = now_iso()
 
     payload, status_code = finalise_workflow(workflow)
     return jsonify(payload), status_code

@@ -168,7 +168,6 @@ INSERT INTO application (
     created_at,
     updated_at
 ) VALUES
-(2010, 6, 1,  '2-Room Flexi', 'S9912364H', NULL, NULL, 'SUCCESSFUL', '2026-03-22 09:10:00', '2026-03-22 09:00:00', '2026-03-22 09:10:00'),
 (2011, 6, 1,  '4-Room',       'S6005055D', NULL, NULL, 'SUCCESSFUL', '2026-03-22 09:20:00', '2026-03-22 09:05:00', '2026-03-22 09:20:00'),
 (2012, 6, 1,  '5-Room',       'S9001234J', NULL, NULL, 'SUCCESSFUL', '2026-03-22 09:30:00', '2026-03-22 09:10:00', '2026-03-22 09:30:00'),
 (2014, 6, 21, '4-Room',       'S9501234R', NULL, NULL, 'SUCCESSFUL', '2026-03-22 09:50:00', '2026-03-22 09:20:00', '2026-03-22 09:50:00'),
@@ -262,7 +261,6 @@ INSERT INTO application_member (
     '2025-12-02 09:10:00'
 ),
 -- App 2010..2019 demo members
-(3010, 2010, 'MAIN_APPLICANT', 'S9912364H', 'NAOMI LEE', 'Self', '1991-06-14', 'Citizen', 'Single', '+65 8111 0001', 'naomi.lee@example.com', 3056.50, '2026-03-22 09:00:00', '2026-03-22 09:10:00'),
 (3011, 2011, 'MAIN_APPLICANT', 'S6005055D', 'DESMOND GOH', 'Self', '1990-05-05', 'Citizen', 'Single', '+65 8111 0002', 'desmond.goh@example.com', 7035.92, '2026-03-22 09:05:00', '2026-03-22 09:20:00'),
 (3012, 2012, 'MAIN_APPLICANT', 'S9001234J', 'JEREMY ONG', 'Self', '1990-01-23', 'Citizen', 'Married', '+65 8111 0003', 'jeremy.ong@example.com', 0.00, '2026-03-22 09:10:00', '2026-03-22 09:30:00'),
 (3013, 2012, 'CO_APPLICANT', 'S9101234M', 'MEI TAN', 'Spouse', '1991-02-18', 'Citizen', 'Married', '+65 8111 0004', 'mei.tan@example.com', 0.00, '2026-03-22 09:10:00', '2026-03-22 09:30:00'),

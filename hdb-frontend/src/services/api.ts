@@ -7,6 +7,8 @@ export const BALLOT_AUDIT_URL = import.meta.env.VITE_BALLOT_AUDIT_URL ?? 'http:/
 export const FLAT_SELECTION_URL = import.meta.env.VITE_FLAT_SELECTION_URL ?? 'http://localhost:5002'
 export const APPLICATION_URL = import.meta.env.VITE_APPLICATION_URL ?? 'http://localhost:5004'
 export const FLAT_URL = import.meta.env.VITE_FLAT_URL ?? 'http://localhost:5006'
+export const NETS_PAYMENT_URL = import.meta.env.VITE_NETS_PAYMENT_URL ?? 'http://localhost:5003'
+export const DOCUMENT_URL = import.meta.env.VITE_DOCUMENT_URL ?? 'http://localhost:5050'
 
 type ApiMessage = string | string[]
 
@@ -209,6 +211,24 @@ export interface ApplyBtoCompletionResult {
   message?: string
 }
 
+export interface DocumentRecord {
+  document_id: number
+  application_id: number
+  document_type: 'income' | 'hfe' | string
+  storage_path: string
+  status: string
+  fields: Record<string, unknown> | null
+  uploaded_at: string | null
+}
+
+export interface DocumentExtractResult {
+  document_id: number
+  application_id: number
+  document_type: 'income' | 'hfe' | string
+  status: string
+  fields: Record<string, unknown>
+}
+
 
 const applyBtoApi = axios.create({
   baseURL: APPLY_BTO_URL,
@@ -242,6 +262,16 @@ const applicationApi = axios.create({
 
 const flatApi = axios.create({
   baseURL: FLAT_URL,
+  timeout: 30000,
+})
+
+const documentApi = axios.create({
+  baseURL: DOCUMENT_URL,
+  timeout: 60000,
+})
+
+const netsPaymentApi = axios.create({
+  baseURL: NETS_PAYMENT_URL,
   timeout: 30000,
 })
 
@@ -306,6 +336,40 @@ export async function completeApplyBtoSubmission(
 ): Promise<{ status: number; data: ApplyBtoCompletionResult }> {
   const response = await applyBtoApi.post<ApplyBtoCompletionResult>(
     `/apply-bto/complete/${encodeURIComponent(merchantTxnRef)}`,
+    undefined,
+    {
+      validateStatus: () => true,
+    },
+  )
+
+  return {
+    status: response.status,
+    data: response.data,
+  }
+}
+
+export async function demoForceApplyBtoSuccess(
+  merchantTxnRef: string,
+): Promise<{ status: number; data: ApplyBtoCompletionResult }> {
+  const response = await applyBtoApi.post<ApplyBtoCompletionResult>(
+    `/apply-bto/demo-force-success/${encodeURIComponent(merchantTxnRef)}`,
+    undefined,
+    {
+      validateStatus: () => true,
+    },
+  )
+
+  return {
+    status: response.status,
+    data: response.data,
+  }
+}
+
+export async function abandonNetsPayment(
+  merchantTxnRef: string,
+): Promise<{ status: number; data: ApiEnvelope<{ merchant_txn_ref: string; status: string; message: string }> }> {
+  const response = await netsPaymentApi.post<ApiEnvelope<{ merchant_txn_ref: string; status: string; message: string }>>(
+    `/payment/abandon/${encodeURIComponent(merchantTxnRef)}`,
     undefined,
     {
       validateStatus: () => true,
@@ -459,5 +523,50 @@ export async function fetchAvailableFlats(
   return {
     status: response.status,
     data: response.data,
+  }
+}
+
+export async function extractDocument(
+  payload: { application_id: number; file: File },
+): Promise<{ status: number; data: DocumentExtractResult | { error: string } }> {
+  const formData = new FormData()
+  formData.append('application_id', String(payload.application_id))
+  formData.append('file', payload.file)
+
+  const response = await documentApi.post<DocumentExtractResult | { error: string }>(
+    '/extract',
+    formData,
+    {
+      validateStatus: () => true,
+    },
+  )
+
+  return {
+    status: response.status,
+    data: response.data,
+  }
+}
+
+export async function fetchDocuments(
+  params?: { application_id?: number },
+): Promise<{ status: number; data: { documents: DocumentRecord[] } | { error: string } }> {
+  const response = await documentApi.get<{ documents?: DocumentRecord[] } | { error: string }>(
+    '/documents',
+    {
+      validateStatus: () => true,
+      params,
+    },
+  )
+
+  if ('documents' in response.data && Array.isArray(response.data.documents)) {
+    return {
+      status: response.status,
+      data: { documents: response.data.documents },
+    }
+  }
+
+  return {
+    status: response.status,
+    data: (response.data as { error: string }) ?? { error: 'Unable to load documents.' },
   }
 }

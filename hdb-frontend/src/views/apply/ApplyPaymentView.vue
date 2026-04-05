@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { AlertCircle, CreditCard, ShieldCheck } from 'lucide-vue-next'
 import { useApplicationStore } from '@/stores/application'
@@ -18,16 +18,6 @@ const householdMemberCount = computed(() => applicationStore.householdMemberCoun
 
 const paymentStep = ref<'idle' | 'initiating' | 'redirecting' | 'error'>('idle')
 const paymentError = ref('')
-const isRecoveringPayment = ref(false)
-
-function getStoredActivePaymentRef(): string | undefined {
-  if (typeof window === 'undefined') {
-    return undefined
-  }
-
-  const refValue = window.sessionStorage.getItem(NETS_ACTIVE_PAYMENT_REF_KEY)
-  return refValue && refValue !== 'unknown' ? refValue : undefined
-}
 
 function storePendingPaymentRef(merchantTxnRef: string) {
   if (typeof window === 'undefined') {
@@ -44,28 +34,6 @@ function clearActivePaymentRef() {
   }
 
   window.sessionStorage.removeItem(NETS_ACTIVE_PAYMENT_REF_KEY)
-}
-
-async function recoverReturnedPayment() {
-  const pendingRef = getStoredActivePaymentRef()
-  if (!pendingRef || isRecoveringPayment.value) {
-    return
-  }
-
-  isRecoveringPayment.value = true
-  try {
-    clearActivePaymentRef()
-    await router.replace({
-      path: '/payment-result',
-      query: { ref: pendingRef },
-    })
-  } finally {
-    isRecoveringPayment.value = false
-  }
-}
-
-function handlePageShow() {
-  void recoverReturnedPayment()
 }
 
 async function confirmPayment() {
@@ -130,17 +98,9 @@ onMounted(() => {
     return
   }
 
-  void recoverReturnedPayment()
-
-  if (typeof window !== 'undefined') {
-    window.addEventListener('pageshow', handlePageShow)
-  }
-})
-
-onBeforeUnmount(() => {
-  if (typeof window !== 'undefined') {
-    window.removeEventListener('pageshow', handlePageShow)
-  }
+  // Clear any stale in-tab payment attempt instead of auto-redirecting to
+  // the result page. The NETS callback already returns directly there.
+  clearActivePaymentRef()
 })
 </script>
 

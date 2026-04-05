@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Building2, FileText, MapPinned, UserRound } from 'lucide-vue-next'
+import { Building2, FileText, MapPinned, UserRound, LogIn } from 'lucide-vue-next'
 import HeroCarousel from '@/components/HeroCarousel.vue'
 import BtoProjectCard from '@/components/BtoProjectCard.vue'
 import ApplicationStatusStepper from '@/components/ApplicationStatusStepper.vue'
@@ -125,7 +125,7 @@ const dashboardTitle = computed(() => {
     }
   }
 
-  return 'No saved application history found for this NRIC'
+  return 'No saved application history found for this account'
 })
 
 const dashboardText = computed(() => {
@@ -143,7 +143,7 @@ const dashboardText = computed(() => {
   }
 
   if (applications.value.length > 0) {
-    return 'Applications saved on this device for the signed-in NRIC appear here, including any household roles returned by Apply BTO.'
+    return 'Applications saved on this device for the signed-in applicant appear here, including any household roles returned by Apply BTO.'
   }
 
   if (showLocalWorkflow.value) {
@@ -403,6 +403,12 @@ function startApplicationFlow() {
   void router.push('/apply/details')
 }
 
+function redirectToMockPass() {
+  const singpassUrl = import.meta.env.VITE_SINGPASS_URL ?? 'http://localhost:5007'
+  const loginUrl = `${singpassUrl}/singpass/auth/login?redirect=${encodeURIComponent('/')}`
+  window.location.assign(loginUrl)
+}
+
 function openApplication(application: ApplicationRecord) {
   applicationStore.openApplication(application)
   void router.push('/apply/review')
@@ -481,7 +487,11 @@ watch(activeApplication, () => {
         <HeroCarousel :slides="heroSlides" />
 
         <div class="hero-actions">
-          <p class="hero-login-hint">Sign in with your NRIC to continue or review the application saved on this device.</p>
+          <p class="hero-login-hint">Sign in with Singpass to continue or review the application saved on this device.</p>
+          <button class="btn btn-primary hero-login-button" type="button" @click="redirectToMockPass">
+            <LogIn :size="17" />
+            <span>Login with Singpass</span>
+          </button>
         </div>
       </div>
     </section>
@@ -493,7 +503,7 @@ watch(activeApplication, () => {
             <p class="eyebrow">Applicant Dashboard</p>
             <h2 class="section-heading">Application status and next steps</h2>
             <p class="section-subtitle">
-              This dashboard shows the application state currently saved in the portal for the signed-in NRIC.
+              This dashboard shows the application state currently saved in the portal for the signed-in applicant.
             </p>
           </div>
         </div>
@@ -534,7 +544,7 @@ watch(activeApplication, () => {
         <div v-if="applications.length > 0" class="dashboard-list">
           <div class="dashboard-list__header">
             <h3>Saved Applications</h3>
-            <p>Applications saved in this browser for the signed-in NRIC appear here after Apply BTO completes.</p>
+            <p>Applications saved in this browser for the signed-in applicant appear here after Apply BTO completes.</p>
           </div>
 
           <div class="application-grid">
@@ -595,7 +605,7 @@ watch(activeApplication, () => {
         >
           <h3>No saved applications yet</h3>
           <p>
-            There are no applications saved locally for this NRIC yet. You can start a fresh application from here.
+            There are no applications saved locally for this account yet. You can start a fresh application from here.
           </p>
         </div>
       </div>
@@ -640,7 +650,9 @@ watch(activeApplication, () => {
 
 .hero-actions {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
   margin-top: 20px;
 }
 
@@ -649,6 +661,12 @@ watch(activeApplication, () => {
   font-size: 0.96rem;
   color: rgba(29, 29, 31, 0.6);
   text-align: center;
+}
+
+.hero-login-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .dashboard-header {

@@ -375,6 +375,24 @@ def mark_record_abandoned(record):
     record['updated_at'] = datetime.now().isoformat()
 
 
+#  Handles mark record successful for demo mode for this service.
+def mark_record_demo_success(record):
+    """Force a successful payment outcome for demo recovery flows."""
+    record['status'] = 'success'
+    record['nets_txn_ref'] = record.get('nets_txn_ref') or f"DEMO{datetime.now().strftime('%Y%m%d%H%M%S%f')}"[:20]
+    record['nets_txn_status'] = '0'
+    record['stage_resp_code'] = 'DEMO-SUCCESS'
+    record['action_code'] = '0'
+    record['nets_txn_msg'] = 'Payment marked as successful via demo override.'
+    record['bank_auth_id'] = record.get('bank_auth_id', '')
+    record['mask_pan'] = record.get('mask_pan', '')
+    record['query_raw_status'] = 'DEMO_OVERRIDE'
+    record['query_latest_code'] = 'DEMO-SUCCESS'
+    record['query_checked_at'] = datetime.now().isoformat()
+    record['verification_source'] = 'demo_override'
+    record['updated_at'] = datetime.now().isoformat()
+
+
 #  Handles interpret query status for this service.
 def interpret_query_status(raw_status):
     """
@@ -926,6 +944,56 @@ def abandon_payment(merchant_txn_ref):
             "action_code": record.get('action_code', ''),
             "message": record.get('nets_txn_msg', ''),
             "verification_source": record.get('verification_source', ''),
+        }
+    }), 200
+
+
+#  Handles demo payment success override for this service.
+@app.route('/payment/demo-force-success/<merchant_txn_ref>', methods=['POST'])
+def demo_force_success(merchant_txn_ref):
+    """
+    Force a local payment record into success for demo use
+    ---
+    tags:
+      - Payment Recovery
+    summary: Force a successful payment outcome locally for demo mode
+    description: |
+      This route exists only for demo recovery. It does not call NETS. Instead,
+      it marks the local in-memory payment record as successful so downstream
+      services can continue through the normal completion flow.
+    parameters:
+      - in: path
+        name: merchant_txn_ref
+        required: true
+        schema:
+          type: string
+    responses:
+      200:
+        description: Payment record marked as successful locally.
+      404:
+        description: No local payment record exists for the supplied merchant transaction reference.
+    """
+    record = payment_records.get(merchant_txn_ref)
+    if not record:
+        return jsonify({
+            "code": 404,
+            "message": "Payment record not found."
+        }), 404
+
+    mark_record_demo_success(record)
+
+    return jsonify({
+        "code": 200,
+        "data": {
+            "applicant_id": record['applicant_id'],
+            "amount": record['amount'],
+            "transaction_id": record.get('nets_txn_ref', ''),
+            "merchant_txn_ref": merchant_txn_ref,
+            "status": "success",
+            "stage_resp_code": record.get('stage_resp_code', ''),
+            "action_code": record.get('action_code', ''),
+            "message": record.get('nets_txn_msg', 'Payment marked as successful via demo override.'),
+            "verification_source": record.get('verification_source', '')
         }
     }), 200
 

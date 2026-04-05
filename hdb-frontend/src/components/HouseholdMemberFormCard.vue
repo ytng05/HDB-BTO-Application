@@ -94,7 +94,7 @@ async function retrieveFromSingPass() {
       <LockKeyhole :size="16" />
       <div>
         <strong>Read-only from Singpass</strong>
-        <p>Identity fields cannot be edited. Relationship, contact number, and email stay editable.</p>
+        <p>Identity, marital, and income fields cannot be edited.</p>
       </div>
     </div>
     <p v-if="retrieveError" class="member-card__feedback member-card__feedback--error">
@@ -218,19 +218,6 @@ async function retrieveFromSingPass() {
       </div>
 
       <div>
-        <label class="field-label" :for="`${member.id}-relationship`">Relationship to Main Applicant</label>
-        <select
-          :id="`${member.id}-relationship`"
-          v-model="member.relationshipToMain"
-          class="field"
-          :disabled="disabled"
-        >
-          <option disabled value="">Select a relationship</option>
-          <option v-for="option in props.relationshipOptions" :key="option" :value="option">{{ option }}</option>
-        </select>
-      </div>
-
-      <div>
         <label class="field-label" :for="`${member.id}-contact-number`">Contact Number</label>
         <input
           :id="`${member.id}-contact-number`"
@@ -250,6 +237,22 @@ async function retrieveFromSingPass() {
           type="email"
           :disabled="disabled"
         />
+      </div>
+    </div>
+
+    <!-- Editable Fields Section -->
+    <div class="member-grid">
+      <div>
+        <label class="field-label" :for="`${member.id}-relationship`">Relationship to Main Applicant</label>
+        <select
+          :id="`${member.id}-relationship`"
+          v-model="member.relationshipToMain"
+          class="field"
+          :disabled="disabled"
+        >
+          <option disabled value="">Select a relationship</option>
+          <option v-for="option in props.relationshipOptions" :key="option" :value="option">{{ option }}</option>
+        </select>
       </div>
     </div>
   </article>

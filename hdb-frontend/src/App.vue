@@ -4,16 +4,30 @@ import { RouterView } from 'vue-router'
 import NavBar from '@/components/NavBar.vue'
 import { useAuth } from '@/stores/auth'
 import { useApplicationStore } from '@/stores/application'
+import { validateSession } from '@/services/myinfo'
 
-const { applicantNric, restoreSession } = useAuth()
+const { applicantNric, isLoggedIn, logout, restoreSession } = useAuth()
 const applicationStore = useApplicationStore()
 
-onMounted(() => {
+async function initialiseSession() {
   restoreSession()
+
+  if (isLoggedIn.value) {
+    const sessionValid = await validateSession()
+    if (!sessionValid) {
+      applicationStore.resetApplication()
+      logout()
+      return
+    }
+  }
 
   if (applicantNric.value) {
     applicationStore.syncSessionApplications(applicantNric.value)
   }
+}
+
+onMounted(() => {
+  void initialiseSession()
 })
 </script>
 

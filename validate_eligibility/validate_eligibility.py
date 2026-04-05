@@ -17,6 +17,7 @@ Expected request format (JSON):
 """
 
 import os
+import re
 
 import requests
 from flask import Flask, jsonify, request
@@ -178,15 +179,85 @@ def make_check(name, passed, message):
     return {"check": name, "passed": passed, "blocking": True, "message": message}
 
 
+# Parses numeric values from MyInfo wrappers/strings.
+def parse_profile_number(value):
+    if value is None:
+        return None
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    if isinstance(value, dict):
+        for key in ("value", "amount", "$numberDecimal", "$numberDouble", "$numberInt"):
+            if key in value:
+                parsed = parse_profile_number(value.get(key))
+                if parsed is not None:
+                    return parsed
+        return None
+
+    if isinstance(value, str):
+        cleaned = value.strip().replace(",", "")
+        cleaned = re.sub(r"[^0-9.\-]", "", cleaned)
+        if not cleaned:
+            return None
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+
+    return None
+
+
 # Gets monthly income from noa.
 def get_monthly_income_from_noa(profile):
-    """Extract monthly income from NOA annual figure, or None if unavailable."""
-    noa = (profile or {}).get("noa")
-    if not isinstance(noa, dict):
+    """
+    Extract monthly income from profile.
+
+    Priority:
+      1) explicit monthlyincome fields
+      2) NOA annual amount/employment divided by 12
+      3) annualincome fields divided by 12
+      4) explicit zero monthlyincome (returns 0.0)
+    """
+    profile = profile or {}
+    if not isinstance(profile, dict):
         return None
-    amount = noa.get("amount", {})
-    value = amount.get("value") if isinstance(amount, dict) else None
-    return float(value) / 12 if value is not None else None
+
+    monthly_candidates = (
+        profile.get("monthlyincome"),
+        profile.get("average_monthly_income"),
+        profile.get("monthly_income"),
+        profile.get("monthlyIncome"),
+    )
+    for candidate in monthly_candidates:
+        parsed = parse_profile_number(candidate)
+        if parsed is not None and parsed > 0:
+            return parsed
+
+    noa = profile.get("noa")
+    if isinstance(noa, dict):
+        annual_candidates = (noa.get("amount"), noa.get("employment"))
+        for candidate in annual_candidates:
+            parsed = parse_profile_number(candidate)
+            if parsed is not None and parsed > 0:
+                return parsed / 12
+
+    annual_candidates = (
+        profile.get("annualincome"),
+        profile.get("annual_income"),
+        profile.get("annualIncome"),
+    )
+    for candidate in annual_candidates:
+        parsed = parse_profile_number(candidate)
+        if parsed is not None and parsed > 0:
+            return parsed / 12
+
+    for candidate in monthly_candidates:
+        parsed = parse_profile_number(candidate)
+        if parsed is not None:
+            return parsed
+
+    return None
 
 
 # ---------------------------------------------------------------------------

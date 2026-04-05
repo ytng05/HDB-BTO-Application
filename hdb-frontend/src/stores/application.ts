@@ -1,6 +1,6 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import { getCitizenshipStatusFromProfile, mapMaritalStatus } from '@/services/myinfo'
+import { getCitizenshipStatusFromProfile, getMonthlyIncomeFromProfile, mapMaritalStatus } from '@/services/myinfo'
 import {
   type ApplicationMemberRequest,
   type ApplyBtoApplicationPayload,
@@ -327,7 +327,10 @@ function isPdfSelection(file: File | null, fileName: string): boolean {
 }
 
 function parseIncomeAmount(value: string): number | null {
-  const normalised = value.replace(/,/g, '').trim()
+  const normalised = value
+    .replace(/,/g, '')
+    .replace(/[^0-9.\-]/g, '')
+    .trim()
   if (!normalised) {
     return null
   }
@@ -338,50 +341,6 @@ function parseIncomeAmount(value: string): number | null {
   }
 
   return Number.parseFloat(parsed.toFixed(2))
-}
-
-function extractMonthlyIncomeFromProfile(profile: MyInfoPersona): string {
-  const candidate =
-    profile.monthlyincome?.value ??
-    profile.average_monthly_income?.value
-
-  const parseIncomeCandidate = (value: number | string | undefined): number | null => {
-    if (value === undefined || value === null) {
-      return null
-    }
-
-    if (typeof value === 'number') {
-      return Number.isFinite(value) && value >= 0 ? value : null
-    }
-
-    return parseIncomeAmount(String(value))
-  }
-
-  if (candidate === undefined || candidate === null) {
-    const householdIncomeLow = parseIncomeCandidate(profile.householdincome?.low?.value)
-    const householdIncomeHigh = parseIncomeCandidate(profile.householdincome?.high?.value)
-
-    if (householdIncomeLow !== null && householdIncomeHigh !== null) {
-      return ((householdIncomeLow + householdIncomeHigh) / 2).toFixed(2)
-    }
-
-    if (householdIncomeLow !== null) {
-      return householdIncomeLow.toFixed(2)
-    }
-
-    if (householdIncomeHigh !== null) {
-      return householdIncomeHigh.toFixed(2)
-    }
-
-    return ''
-  }
-
-  const parsedIncome = parseIncomeCandidate(candidate)
-  if (parsedIncome !== null) {
-    return parsedIncome.toFixed(2)
-  }
-
-  return ''
 }
 
 export const useApplicationStore = defineStore('application', () => {
@@ -636,7 +595,7 @@ export const useApplicationStore = defineStore('application', () => {
     form.value.fullName = persona.name?.value ?? form.value.fullName
     form.value.nric = normaliseNric(form.value.nric || persona.uinfin?.value || '')
     form.value.dateOfBirth = persona.dob?.value ?? ''
-    form.value.monthlyIncome = extractMonthlyIncomeFromProfile(persona) || form.value.monthlyIncome
+    form.value.monthlyIncome = getMonthlyIncomeFromProfile(persona)
     form.value.contactNumber = persona.mobileno?.nbr?.value ?? ''
     form.value.email = persona.email?.value ?? ''
     form.value.maritalStatus = mapMaritalStatus(persona.marital?.code)
@@ -650,7 +609,7 @@ export const useApplicationStore = defineStore('application', () => {
       member.fullName = persona.name?.value ?? member.fullName
       member.nric = normaliseNric(member.nric || persona.uinfin?.value || '')
       member.dateOfBirth = persona.dob?.value ?? ''
-      member.monthlyIncome = extractMonthlyIncomeFromProfile(persona) || member.monthlyIncome
+      member.monthlyIncome = getMonthlyIncomeFromProfile(persona)
       member.contactNumber = persona.mobileno?.nbr?.value ?? member.contactNumber
       member.email = persona.email?.value ?? member.email
       member.maritalStatus = mapMaritalStatus(persona.marital?.code)

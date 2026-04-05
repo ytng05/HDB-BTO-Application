@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { AlertTriangle, CheckCircle2, Play, RefreshCcw } from 'lucide-vue-next'
 import {
+  extractDocument,
+  fetchDocuments,
   fetchApplications,
   createBallotAudit,
   fetchBallotAudits,
@@ -9,6 +11,7 @@ import {
   fetchFlatSelections,
   runProcessBallot,
   type BallotAuditRecord,
+  type DocumentRecord,
   type FlatSelectionRecord,
 } from '@/services/api'
 import { getProjectTown } from '@/data/projects'
@@ -39,6 +42,14 @@ const isLoadingQueue = ref(false)
 
 const message = ref('')
 const errorMessage = ref('')
+
+const documentDebugApplicationId = ref<number>(9101)
+const documentDebugFile = ref<File | null>(null)
+const isExtractingDocument = ref(false)
+const isLoadingDocumentHistory = ref(false)
+const documentDebugError = ref('')
+const lastExtractedDocument = ref<Record<string, unknown> | null>(null)
+const recentDocuments = ref<DocumentRecord[]>([])
 
 const completedExerciseIds = computed(() => {
   const completed = audits.value
@@ -444,9 +455,71 @@ async function refreshDashboard() {
   await loadQueueRecords()
 }
 
+function handleDocumentFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  documentDebugFile.value = input.files?.[0] ?? null
+}
+
+async function loadDocumentHistory() {
+  isLoadingDocumentHistory.value = true
+  documentDebugError.value = ''
+
+  try {
+    const { status, data } = await fetchDocuments({ application_id: documentDebugApplicationId.value })
+
+    if (status === 200 && 'documents' in data) {
+      recentDocuments.value = [...data.documents]
+      return
+    }
+
+    recentDocuments.value = []
+    documentDebugError.value = 'error' in data ? data.error : 'Unable to load document history.'
+  } catch (error) {
+    recentDocuments.value = []
+    documentDebugError.value = error instanceof Error ? error.message : 'Unable to load document history.'
+  } finally {
+    isLoadingDocumentHistory.value = false
+  }
+}
+
+async function runDocumentExtractionDebug() {
+  documentDebugError.value = ''
+
+  if (!documentDebugFile.value) {
+    documentDebugError.value = 'Please choose a PDF file first.'
+    return
+  }
+
+  if (documentDebugApplicationId.value <= 0) {
+    documentDebugError.value = 'Please provide a valid application_id.'
+    return
+  }
+
+  isExtractingDocument.value = true
+  try {
+    const { status, data } = await extractDocument({
+      application_id: documentDebugApplicationId.value,
+      file: documentDebugFile.value,
+    })
+
+    if (status === 200 && 'document_id' in data) {
+      lastExtractedDocument.value = data as unknown as Record<string, unknown>
+      await loadDocumentHistory()
+      return
+    }
+
+    documentDebugError.value = 'error' in data ? data.error : 'Document extraction failed.'
+  } catch (error) {
+    documentDebugError.value = error instanceof Error ? error.message : 'Document extraction failed.'
+  } finally {
+    isExtractingDocument.value = false
+  }
+}
+
 onMounted(async () => {
   await Promise.all([loadExercises(), loadAudits(), loadCurrentProjectScope()])
   await loadQueueRecords()
+  await loadDocumentHistory()
 })
 </script>
 
@@ -646,6 +719,78 @@ onMounted(async () => {
           </table>
         </div>
       </div>
+
+      <div class="surface panel">
+        <div class="panel-headline">
+          <h2>Document Extraction Debug</h2>
+          <p class="muted-text">Upload a PDF and inspect extracted OCR fields immediately.</p>
+        </div>
+
+        <div class="doc-debug-grid">
+          <label class="runner-field">
+            <span>Application ID</span>
+            <input
+              v-model.number="documentDebugApplicationId"
+              class="field"
+              type="number"
+              min="1"
+            />
+          </label>
+
+          <label class="runner-field">
+            <span>PDF File</span>
+            <input
+              class="field"
+              type="file"
+              accept="application/pdf,.pdf"
+              @change="handleDocumentFileChange"
+            />
+          </label>
+        </div>
+
+        <div class="panel-actions">
+          <button class="btn btn-primary" type="button" :disabled="isExtractingDocument" @click="runDocumentExtractionDebug">
+            <span>{{ isExtractingDocument ? 'Extracting...' : 'Run Extraction' }}</span>
+          </button>
+          <button class="btn btn-secondary" type="button" :disabled="isLoadingDocumentHistory" @click="loadDocumentHistory">
+            <span>{{ isLoadingDocumentHistory ? 'Loading...' : 'Refresh History' }}</span>
+          </button>
+        </div>
+
+        <p v-if="documentDebugError" class="message message--error">
+          <AlertTriangle :size="16" />
+          <span>{{ documentDebugError }}</span>
+        </p>
+
+        <div v-if="lastExtractedDocument" class="doc-json-preview">
+          <p class="muted-text">Last extraction result</p>
+          <pre>{{ JSON.stringify(lastExtractedDocument, null, 2) }}</pre>
+        </div>
+
+        <div class="table-wrap">
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>Document ID</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Uploaded At</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="document in recentDocuments" :key="document.document_id">
+                <td>{{ document.document_id }}</td>
+                <td>{{ document.document_type }}</td>
+                <td>{{ document.status }}</td>
+                <td>{{ formatDateTime(document.uploaded_at) }}</td>
+              </tr>
+              <tr v-if="recentDocuments.length === 0">
+                <td colspan="4">No documents found for this application ID.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </section>
 </template>
@@ -695,6 +840,30 @@ onMounted(async () => {
   align-items: baseline;
   gap: 10px;
   margin-bottom: 12px;
+}
+
+.doc-debug-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.doc-json-preview {
+  margin-top: 14px;
+  margin-bottom: 14px;
+}
+
+.doc-json-preview pre {
+  margin: 8px 0 0;
+  background: rgba(29, 29, 31, 0.04);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 12px;
+  max-height: 320px;
+  overflow: auto;
+  font-size: 0.82rem;
+  line-height: 1.4;
 }
 
 .queue-filters {
@@ -824,7 +993,8 @@ onMounted(async () => {
 
 @media (max-width: 1020px) {
   .queue-filters,
-  .room-type-grid {
+  .room-type-grid,
+  .doc-debug-grid {
     grid-template-columns: 1fr;
   }
 

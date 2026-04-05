@@ -4,7 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { AlertCircle, CheckCircle2, Clock3, FileWarning, XCircle } from 'lucide-vue-next'
 import { useApplicationStore } from '@/stores/application'
 import {
+  abandonNetsPayment,
   completeApplyBtoSubmission,
+  demoForceApplyBtoSuccess,
   getErrorMessage,
   type ApplyBtoCompletionResult,
 } from '@/services/api'
@@ -15,6 +17,7 @@ const applicationStore = useApplicationStore()
 const NETS_PAYMENT_REF_KEY = 'nets_last_merchant_txn_ref'
 const NETS_ACTIVE_PAYMENT_REF_KEY = 'nets_active_merchant_txn_ref'
 const PENDING_POLL_INTERVAL_MS = 4000
+const PENDING_TIMEOUT_MS = 13000
 
 function getStoredPaymentRef(): string | undefined {
   if (typeof window === 'undefined') {
@@ -48,6 +51,9 @@ const wrapperResult = ref<ApplyBtoCompletionResult | null>(null)
 const statusMessage = ref('Finalising your application through Apply BTO...')
 const verificationError = ref('')
 const isVerifying = ref(true)
+const isForcingDemoSuccess = ref(false)
+const pendingStartedAt = ref<number | null>(null)
+const pendingAutoCancelTriggered = ref(false)
 
 let pendingPollHandle: number | null = null
 
@@ -165,6 +171,8 @@ async function finaliseWorkflow() {
     wrapperResult.value = response.data
 
     if (response.status === 200) {
+      pendingStartedAt.value = null
+      pendingAutoCancelTriggered.value = false
       statusMessage.value = buildCompletedMessage(response.data)
       clearStoredPaymentRef()
       const completedSuccessfully =
@@ -177,18 +185,55 @@ async function finaliseWorkflow() {
     }
 
     if (response.status === 202) {
+      if (pendingStartedAt.value === null) {
+        pendingStartedAt.value = Date.now()
+      }
+
+      const elapsedMs = Date.now() - pendingStartedAt.value
+      if (elapsedMs >= PENDING_TIMEOUT_MS && !pendingAutoCancelTriggered.value && paymentRef.value) {
+        pendingAutoCancelTriggered.value = true
+        statusMessage.value = 'Payment stayed pending for too long. Cancelling this transaction now...'
+
+        const abandonResponse = await abandonNetsPayment(paymentRef.value)
+        if (abandonResponse.status === 200) {
+          const abandonData = abandonResponse.data.data
+          const abandonMessage =
+            (abandonData && typeof abandonData.message === 'string' && abandonData.message.trim())
+              ? abandonData.message
+              : 'Payment was cancelled after timing out in pending state.'
+
+          completionStatus.value = 402
+          wrapperResult.value = {
+            merchant_txn_ref: paymentRef.value,
+            stage: 'payment_failed',
+            payment_status: 'cancelled',
+            message: abandonMessage,
+          }
+          statusMessage.value = abandonMessage
+          clearStoredPaymentRef()
+          pendingStartedAt.value = null
+          return
+        }
+
+        pendingAutoCancelTriggered.value = false
+      }
+
       statusMessage.value = response.data.message || 'Payment is still pending.'
       schedulePendingPoll()
       return
     }
 
     if (response.status === 402) {
+      pendingStartedAt.value = null
+      pendingAutoCancelTriggered.value = false
       statusMessage.value = response.data.message || 'Payment did not complete successfully.'
       clearStoredPaymentRef()
       return
     }
 
     if (response.status === 404) {
+      pendingStartedAt.value = null
+      pendingAutoCancelTriggered.value = false
       statusMessage.value = response.data.message || 'The Apply BTO transaction reference could not be found.'
       clearStoredPaymentRef()
       return
@@ -210,7 +255,48 @@ async function finaliseWorkflow() {
   }
 }
 
+async function handleDemoForceSuccess() {
+  if (!paymentRef.value) {
+    completionStatus.value = 404
+    statusMessage.value = 'Missing transaction reference. Unable to force payment success for this demo.'
+    return
+  }
+
+  clearPendingPoll()
+  verificationError.value = ''
+  isVerifying.value = false
+  isForcingDemoSuccess.value = true
+  statusMessage.value = 'Forcing payment success for demo mode and completing your application...'
+
+  try {
+    const response = await demoForceApplyBtoSuccess(paymentRef.value)
+    completionStatus.value = response.status
+    wrapperResult.value = response.data
+
+    if (response.status === 200) {
+      statusMessage.value = buildCompletedMessage(response.data)
+      clearStoredPaymentRef()
+      const completedSuccessfully =
+        response.data.eligible === true || response.data.application_status === 'SUCCESSFUL'
+
+      applicationStore.status = completedSuccessfully ? 'successful' : 'editing'
+      applicationStore.queueNumber = null
+      applicationStore.lastSubmittedAt = new Date().toISOString()
+      return
+    }
+
+    statusMessage.value = response.data.message || 'Unable to force payment success for this demo.'
+  } catch (error) {
+    verificationError.value = getErrorMessage(error, 'Unable to force payment success for this demo.')
+    statusMessage.value = verificationError.value
+  } finally {
+    isForcingDemoSuccess.value = false
+  }
+}
+
 onMounted(() => {
+  pendingStartedAt.value = null
+  pendingAutoCancelTriggered.value = false
   void finaliseWorkflow()
 })
 
@@ -323,6 +409,14 @@ onBeforeUnmount(() => {
         <div class="result-actions">
           <button class="btn btn-secondary" type="button" @click="router.push('/apply/payment')">
             Try Again
+          </button>
+          <button
+            class="btn btn-secondary"
+            type="button"
+            :disabled="isForcingDemoSuccess"
+            @click="handleDemoForceSuccess"
+          >
+            {{ isForcingDemoSuccess ? 'Forcing Demo Success...' : 'Demo: Force Success' }}
           </button>
           <button class="btn btn-primary" type="button" @click="router.push('/')">
             Return Home

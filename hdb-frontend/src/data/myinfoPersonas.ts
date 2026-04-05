@@ -19,6 +19,11 @@ interface HouseholdIncomeField {
   high?: ValueField<number | string>
 }
 
+interface NoaField {
+  amount?: ValueField<number | string>
+  employment?: ValueField<number | string>
+}
+
 export interface MyInfoPersona {
   name?: ValueField<string>
   dob?: ValueField<string>
@@ -33,4 +38,5 @@ export interface MyInfoPersona {
   monthlyincome?: ValueField<number | string>
   average_monthly_income?: ValueField<number | string>
   householdincome?: HouseholdIncomeField
+  noa?: NoaField
 }

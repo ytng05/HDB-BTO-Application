@@ -6,6 +6,7 @@ import SelectionModal from '@/components/SelectionModal.vue'
 import HouseholdMemberFormCard from '@/components/HouseholdMemberFormCard.vue'
 import { useApplicationStore } from '@/stores/application'
 import { getMyInfoProfile } from '@/services/myinfo'
+import { looksLikeNric } from '@/utils/validation'
 
 const router = useRouter()
 const applicationStore = useApplicationStore()
@@ -45,15 +46,24 @@ const submitLabel = computed(() =>
   isCurrentSubmitted.value ? 'View Submitted Application' : 'Submit Application',
 )
 
-async function retrieveMainApplicantFromSingPass() {
+async function retrieveMainApplicantFromMyInfo() {
   isRetrievingMain.value = true
   retrieveMainSuccess.value = false
   retrieveMainError.value = ''
 
   try {
-    const persona = await getMyInfoProfile(applicationStore.form.nric)
+    const trimmedNric = applicationStore.form.nric.trim().toUpperCase()
+    // Prefer explicit NRIC lookup for complete profile fields (income, marital, contact).
+    // Session profile can be minimal depending on auth-code claims returned by MockPass.
+    let persona = trimmedNric ? await getMyInfoProfile(trimmedNric) : null
+
+    // Fallback to session profile only when explicit lookup is unavailable.
     if (!persona) {
-      retrieveMainError.value = 'No MyInfo data found for this NRIC. Please fill in the details manually.'
+      persona = await getMyInfoProfile()
+    }
+
+    if (!persona) {
+      retrieveMainError.value = 'No MyInfo profile found. Please sign in first or enter a valid NRIC.'
       return
     }
 
@@ -114,13 +124,6 @@ function resetApplication() {
       <p>Fill in your household details, upload documents, and continue to payment.</p>
     </div>
 
-    <div class="workflow-note">
-      <p class="workflow-note__title">Quick Flow</p>
-      <p>Main applicant, household members, documents, then flat preference.</p>
-    </div>
-
-    <p v-if="!isCurrentSubmitted" class="progress-note">Progress is saved automatically on this device.</p>
-
     <section class="form-section">
       <div class="form-section__header">
         <div>
@@ -128,7 +131,7 @@ function resetApplication() {
             <HousePlus :size="20" />
             <h3>Main Applicant</h3>
           </div>
-          <p>Load details from Singpass. Contact number and email stay editable.</p>
+          <p>Retrieve details from MyInfo. Contact number and email stay editable.</p>
         </div>
       </div>
 
@@ -137,12 +140,12 @@ function resetApplication() {
           class="btn btn-singpass"
           type="button"
           :disabled="isRetrievingMain || isCurrentSubmitted"
-          @click="retrieveMainApplicantFromSingPass"
+          @click="retrieveMainApplicantFromMyInfo"
         >
           <span v-if="isRetrievingMain">Retrieving...</span>
-          <span v-else>Load Main Applicant from Singpass</span>
+          <span v-else>Retrieve from MyInfo</span>
         </button>
-        <p class="singpass-retrieve__hint">Enter NRIC first.</p>
+        <p class="singpass-retrieve__hint">Uses signed-in MyInfo session, or your entered NRIC as fallback.</p>
       </div>
 
       <p v-if="retrieveMainSuccess" class="retrieve-success">Main applicant details loaded.</p>
@@ -150,7 +153,7 @@ function resetApplication() {
         <LockKeyhole :size="18" />
         <div>
           <strong>Read-only from Singpass</strong>
-          <p>Identity fields cannot be edited.</p>
+          <p>Identity, marital, and contact fields cannot be edited.</p>
         </div>
       </div>
       <p v-if="retrieveMainError" class="retrieve-error">{{ retrieveMainError }}</p>
@@ -295,7 +298,6 @@ function resetApplication() {
             <Users :size="20" />
             <h3>Household Members</h3>
           </div>
-          <p>Add co-applicant and occupiers.</p>
         </div>
         <div v-if="!isCurrentSubmitted" class="section-actions">
           <button class="btn btn-secondary" type="button" :disabled="hasCoApplicant" @click="addCoApplicant">
@@ -308,10 +310,6 @@ function resetApplication() {
           </button>
         </div>
       </div>
-
-      <p v-if="hasCoApplicant && !isCurrentSubmitted" class="member-limit-note">
-        Only one co-applicant can be added for this application.
-      </p>
 
       <div v-if="!hasSupportingMembers" class="empty-members">
         <p>No co-applicants or occupiers added yet.</p>
@@ -401,10 +399,6 @@ function resetApplication() {
           </p>
           <p v-else class="doc-note">No HFE letter selected yet.</p>
         </div>
-      </div>
-
-      <div class="submit-note">
-        <p>These PDFs are sent with your application before NETS payment.</p>
       </div>
     </section>
 

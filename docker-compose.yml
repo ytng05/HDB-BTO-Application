@@ -55,6 +55,24 @@ services:
       - application-db
     restart: always
 
+  mockpass-service:
+    build:
+      context: .
+      dockerfile: mockpass/Dockerfile
+    container_name: mockpass_service
+    ports:
+      - "5156:5156"
+    environment:
+      SHOW_LOGIN_PAGE: "true"
+      MOCKPASS_STATELESS: "true"
+      MYINFO_V3_PATH: /app/v3.json
+      # MyInfo v3 Configuration - Use test certificates from npm package (local install)
+      SERVICE_PROVIDER_CERT_PATH: /app/node_modules/@opengovsg/mockpass/static/certs/server.crt
+      SERVICE_PROVIDER_PUB_KEY: /app/node_modules/@opengovsg/mockpass/static/certs/key.pub
+      SERVICE_PROVIDER_MYINFO_SECRET: test-secret-key
+      ENCRYPT_MYINFO: "false"
+    restart: always
+
   singpass-service:
     build:
       context: ./singpass
@@ -63,7 +81,18 @@ services:
     ports:
       - "5007:5007"
     environment:
-      SINGPASS_DATA_PATH: /app/v3.json
+      MOCKPASS_URL: http://mockpass-service:5156
+      MOCKPASS_BROWSER_URL: http://localhost:5156
+      MOCKPASS_AUTH_PATH: /singpass/v2/auth
+      MOCKPASS_CLIENT_ID: hdb-flat-portal
+      # Enable session management: true | false
+      ENABLE_SESSIONS: "true"
+      SESSION_TIMEOUT_MINUTES: 60
+      AUTH_STATE_TIMEOUT_SECONDS: 300
+      FRONTEND_URL: http://localhost:5173
+      FRONTEND_AUTH_CALLBACK_PATH: /auth/callback
+    depends_on:
+      - mockpass-service
     restart: always
 
   hfe-application-db:
