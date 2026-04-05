@@ -12,8 +12,9 @@ Checks performed (via Singpass profile):
   4. HDB ownership    — neither applicant may currently own an HDB flat
   5. Income ceiling   — combined household income (from NOA) within flat-type ceiling
 
-Expected request format (JSON):
+Expected request formats:
   GET /validate-eligibility?application_id=2001&main_applicant_nric=S9812381D
+  POST /validate-eligibility/bulk with grouped application payloads
 """
 
 import os
@@ -31,7 +32,7 @@ from flasgger import Swagger
 
 SINGPASS_SERVICE_URL = os.environ.get("SINGPASS_SERVICE_URL", "http://localhost:5007")
 APPLICATION_SERVICE_URL = os.environ.get("APPLICATION_SERVICE_URL", "http://localhost:5004")
-REQUEST_TIMEOUT      = float(os.environ.get("REQUEST_TIMEOUT_SECONDS", "15"))
+REQUEST_TIMEOUT = float(os.environ.get("REQUEST_TIMEOUT_SECONDS", "15"))
 
 # HDB household income ceilings (SGD/month) by flat type.
 INCOME_CEILING_BY_FLAT_TYPE = {
@@ -458,7 +459,137 @@ def run_income_checks(main_profile, co_profile, has_co_applicant, flat_type):
 
 
 # ---------------------------------------------------------------------------
-# Main endpoint
+# Validation core
+# ---------------------------------------------------------------------------
+
+def validate_application_payload(application_id, provided_main_nric=None, provided_co_nric=None):
+    """Validate one application and return a structured orchestration-friendly payload."""
+    app_status, application_record = fetch_application_record(application_id)
+    if app_status == 404:
+        return 404, {
+            "error": f"Application {application_id} not found.",
+            "application_id": application_id,
+            "application_update": {
+                "attempted": False,
+                "updated": False,
+                "status_code": 404,
+                "message": "Application record not found.",
+            },
+        }
+    if app_status != 200:
+        return 502, {
+            "error": application_record.get("error") or "Unable to fetch application record.",
+            "application_id": application_id,
+            "application_update": {
+                "attempted": False,
+                "updated": False,
+                "status_code": app_status,
+                "message": "Unable to fetch application record.",
+            },
+        }
+
+    main_nric = normalise_nric(application_record.get("main_applicant_nric"))
+    flat_type = (application_record.get("flat_type") or "").strip()
+    members = application_record.get("members") or []
+
+    if main_nric is None:
+        return 400, {
+            "error": "Application record is missing main_applicant_nric.",
+            "application_id": application_id,
+            "application_update": {
+                "attempted": False,
+                "updated": False,
+                "status_code": 400,
+                "message": "Application record is missing main_applicant_nric.",
+            },
+        }
+
+    if provided_main_nric and provided_main_nric != main_nric:
+        return 400, {
+            "error": "main_applicant_nric does not match the application record.",
+            "application_id": application_id,
+            "main_applicant_nric": main_nric,
+            "application_update": {
+                "attempted": False,
+                "updated": False,
+                "status_code": 400,
+                "message": "main_applicant_nric does not match the application record.",
+            },
+        }
+
+    co_member = get_member_by_role(members, "CO_APPLICANT")
+    has_co_applicant = co_member is not None
+    co_nric = normalise_nric(co_member.get("nric_fin")) if co_member else None
+
+    if provided_co_nric and provided_co_nric != co_nric:
+        return 400, {
+            "error": "co_applicant_nric does not match the application record.",
+            "application_id": application_id,
+            "co_applicant_nric": co_nric,
+            "application_update": {
+                "attempted": False,
+                "updated": False,
+                "status_code": 400,
+                "message": "co_applicant_nric does not match the application record.",
+            },
+        }
+
+    try:
+        main_profile = fetch_singpass_profile(main_nric)
+        co_profile = fetch_singpass_profile(co_nric) if co_nric else None
+    except requests.RequestException as exc:
+        return 502, {
+            "error": f"Failed to reach Singpass service: {exc}",
+            "application_id": application_id,
+            "main_applicant_nric": main_nric,
+            "co_applicant_nric": co_nric,
+            "application_update": {
+                "attempted": False,
+                "updated": False,
+                "status_code": 502,
+                "message": f"Failed to reach Singpass service: {exc}",
+            },
+        }
+
+    all_checks = {
+        "citizenship": run_citizenship_checks(main_profile, co_profile, has_co_applicant),
+        "marital_status": run_marital_checks(main_profile, has_co_applicant),
+        "private_property": run_private_property_checks(main_profile, co_profile, has_co_applicant),
+        "hdb_ownership": run_hdb_ownership_checks(main_profile, co_profile, has_co_applicant),
+        "income_ceiling": run_income_checks(main_profile, co_profile, has_co_applicant, flat_type),
+    }
+
+    ineligibility_reasons = list(dict.fromkeys(
+        check["message"]
+        for category in all_checks.values()
+        for check in category
+        if not check["passed"]
+    ))
+
+    eligible = len(ineligibility_reasons) == 0
+    application_update = {
+        "attempted": False,
+        "updated": False,
+        "status_code": None,
+        "message": "No application status update required.",
+    }
+    if not eligible:
+        application_update = mark_application_ineligible(application_id)
+
+    return 200, {
+        "application_id": application_id,
+        "main_applicant_nric": main_nric,
+        "co_applicant_nric": co_nric,
+        "flat_type": flat_type,
+        "eligible": eligible,
+        "checks": all_checks,
+        "ineligibility_reasons": ineligibility_reasons,
+        "application_update": application_update,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main endpoints
 # ---------------------------------------------------------------------------
 
 # Handles the eligibility re-validation flow before balloting.
@@ -509,84 +640,81 @@ def validate_eligibility():
 
     provided_main_nric = normalise_nric(request.args.get("main_applicant_nric"))
     provided_co_nric = normalise_nric(request.args.get("co_applicant_nric"))
+    status_code, payload = validate_application_payload(
+        application_id,
+        provided_main_nric=provided_main_nric,
+        provided_co_nric=provided_co_nric,
+    )
+    return jsonify(payload), status_code
 
-    app_status, application_record = fetch_application_record(application_id)
-    if app_status == 404:
-        return jsonify({
-            "error": f"Application {application_id} not found.",
-            "application_id": application_id,
-        }), 404
-    if app_status != 200:
-        return jsonify({
-            "error": application_record.get("error") or "Unable to fetch application record.",
-            "application_id": application_id,
-        }), 502
 
-    main_nric = normalise_nric(application_record.get("main_applicant_nric"))
-    flat_type = (application_record.get("flat_type") or "").strip()
-    members = application_record.get("members") or []
+@app.route("/validate-eligibility/bulk", methods=["POST"])
+def validate_eligibility_bulk():
+    """Validate multiple applications in grouped batches."""
+    payload = request.get_json(silent=True) or {}
+    groups = payload.get("groups")
+    if not isinstance(groups, list) or not groups:
+        return jsonify({"error": "groups must be a non-empty list."}), 400
 
-    if main_nric is None:
-        return jsonify({
-            "error": "Application record is missing main_applicant_nric.",
-            "application_id": application_id,
-        }), 400
+    grouped_results = []
+    warnings = []
 
-    if provided_main_nric and provided_main_nric != main_nric:
-        return jsonify({
-            "error": "main_applicant_nric does not match the application record.",
-            "application_id": application_id,
-            "main_applicant_nric": main_nric,
-        }), 400
+    for group_index, group in enumerate(groups):
+        if not isinstance(group, dict):
+            warnings.append(f"Skipped non-object group at index {group_index}.")
+            continue
 
-    co_member = get_member_by_role(members, "CO_APPLICANT")
-    has_co_applicant = co_member is not None
-    co_nric = normalise_nric(co_member.get("nric_fin")) if co_member else None
+        town_name = group.get("town_name")
+        flat_type = group.get("flat_type")
+        rows = group.get("applications")
+        if not isinstance(rows, list) or not rows:
+            warnings.append(f"Skipped invalid or empty applications list in group index {group_index}.")
+            continue
 
-    if provided_co_nric and provided_co_nric != co_nric:
-        return jsonify({
-            "error": "co_applicant_nric does not match the application record.",
-            "application_id": application_id,
-            "co_applicant_nric": co_nric,
-        }), 400
+        group_results = []
+        group_warnings = []
+        for row_index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                group_warnings.append(f"Skipped non-object item at index {row_index}.")
+                continue
 
-    # ------------------------------------------------------------------
-    # Fetch Singpass profiles
-    # ------------------------------------------------------------------
-    try:
-        main_profile = fetch_singpass_profile(main_nric)
-        co_profile   = fetch_singpass_profile(co_nric) if co_nric else None
-    except requests.RequestException as exc:
-        return jsonify({"error": f"Failed to reach Singpass service: {exc}"}), 502
+            application_id = row.get("application_id")
+            if not isinstance(application_id, int) or application_id <= 0:
+                group_results.append({
+                    "application_id": application_id,
+                    "eligible": False,
+                    "ineligibility_reasons": ["application_id is required and must be a positive integer."],
+                    "application_update": {
+                        "attempted": False,
+                        "updated": False,
+                        "status_code": 400,
+                        "message": "Validation skipped due to invalid application_id.",
+                    },
+                    "validation_status_code": 400,
+                })
+                continue
 
-    # ------------------------------------------------------------------
-    # Run all checks
-    # ------------------------------------------------------------------
-    all_checks = {
-        "citizenship":      run_citizenship_checks(main_profile, co_profile, has_co_applicant),
-        "marital_status":   run_marital_checks(main_profile, has_co_applicant),
-        "private_property": run_private_property_checks(main_profile, co_profile, has_co_applicant),
-        "hdb_ownership":    run_hdb_ownership_checks(main_profile, co_profile, has_co_applicant),
-        "income_ceiling":   run_income_checks(main_profile, co_profile, has_co_applicant, flat_type),
-    }
+            status_code, result = validate_application_payload(
+                application_id,
+                provided_main_nric=normalise_nric(row.get("main_applicant_nric")),
+                provided_co_nric=normalise_nric(row.get("co_applicant_nric")),
+            )
+            result["validation_status_code"] = status_code
+            group_results.append(result)
 
-    ineligibility_reasons = list(dict.fromkeys(
-        check["message"]
-        for category in all_checks.values()
-        for check in category
-        if not check["passed"]
-    ))
-
-    eligible = len(ineligibility_reasons) == 0
-    if not eligible:
-        # Keep side effect: mark application as UNSUCCESSFUL in application service.
-        mark_application_ineligible(application_id)
+        grouped_results.append({
+            "town_name": town_name if isinstance(town_name, str) else None,
+            "flat_type": flat_type if isinstance(flat_type, str) else None,
+            "count": len(group_results),
+            "warnings": group_warnings,
+            "results": group_results,
+        })
 
     return jsonify({
-        "application_id": application_id,
-        "eligible": eligible,
-        "ineligibility_reasons": ineligibility_reasons,
-    })
+        "count": sum(group.get("count", 0) for group in grouped_results if isinstance(group, dict)),
+        "warnings": warnings,
+        "groups": grouped_results,
+    }), 200
 
 
 if __name__ == "__main__":

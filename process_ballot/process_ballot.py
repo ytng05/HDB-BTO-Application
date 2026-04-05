@@ -15,9 +15,10 @@ BALLOT_AUDIT_SERVICE_URL = os.environ.get("BALLOT_AUDIT_SERVICE_URL", "http://lo
 BALLOT_SERVICE_URL = os.environ.get("BALLOT_SERVICE_URL", "http://localhost:5005")
 APPLICATION_SERVICE_URL = os.environ.get("APPLICATION_SERVICE_URL", "http://localhost:5004")
 PROJECT_SERVICE_URL = os.environ.get("PROJECT_SERVICE_URL", "http://localhost:5012")
-VALIDATE_ELIGIBILITY_SERVICE_URL = os.environ.get("VALIDATE_ELIGIBILITY_SERVICE_URL","http://localhost:5013")
+VALIDATE_ELIGIBILITY_SERVICE_URL = os.environ.get("VALIDATE_ELIGIBILITY_SERVICE_URL", "http://localhost:5013")
 FLAT_SELECTION_SERVICE_URL = os.environ.get("FLAT_SELECTION_SERVICE_URL", "http://localhost:5002")
 REQUEST_TIMEOUT = float(os.environ.get("REQUEST_TIMEOUT_SECONDS", "20"))
+VALIDATION_BATCH_SIZE = max(1, int(os.environ.get("VALIDATION_BATCH_SIZE", "25")))
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
 logging.basicConfig(
@@ -221,47 +222,57 @@ def fetch_ballot_candidate_applications(exercise_id):
     _, payload = request_json(
         "GET",
         f"{APPLICATION_SERVICE_URL}/applications",
-        params={"exercise_id": exercise_id},
+        params={"exercise_id": exercise_id, "application_status": "SUCCESSFUL"},
         allowed_statuses=(200,),
     )
     applications = payload.get("applications")
     if not isinstance(applications, list):
         raise BallotOrchestrationError("Applications service returned an invalid payload.", 502)
 
-    ballot_statuses = {"SUCCESSFUL"}
-    candidates = [
-        application
-        for application in applications
-        if isinstance(application, dict) and application.get("application_status") in ballot_statuses
-    ]
-
     log_action(
         "Fetched ballot candidate applications",
         exercise_id=exercise_id,
-        application_count=len(candidates),
-        total_exercise_application_count=len(applications),
+        application_count=len(applications),
+        status_filter="SUCCESSFUL",
     )
-    return candidates
+    return applications
 
 
 # Fetches ballot chances.
-def fetch_ballot_chances(applications):
-    """Fetch ballot chances from flat-selection service."""
+def fetch_ballot_chances(applications, exercise_projects):
+    """Fetch ballot chances from flat-selection service using grouped bulk requests."""
     log_action("Preparing ballot chance request", incoming_records=len(applications))
-    payload_rows = []
+    projects_by_id = {
+        item.get("project_id"): item
+        for item in exercise_projects
+        if isinstance(item, dict) and isinstance(item.get("project_id"), int)
+    }
+
+    grouped_rows = defaultdict(list)
     for application in applications:
         if not isinstance(application, dict):
             continue
         application_id = application.get("application_id")
+        project_id = application.get("project_id")
+        flat_type = application.get("flat_type")
         main_applicant_nric = normalise_nric(application.get("main_applicant_nric"))
         co_applicant_nric = get_co_applicant_nric(application)
 
         if not is_positive_int(application_id):
             continue
+        if not isinstance(project_id, int):
+            continue
+        if not isinstance(flat_type, str) or not flat_type.strip():
+            continue
         if main_applicant_nric is None:
             continue
 
-        payload_rows.append(
+        project = projects_by_id.get(project_id)
+        town_name = str(project.get("town_name") or "").strip() if isinstance(project, dict) else ""
+        if not town_name:
+            continue
+
+        grouped_rows[(town_name, flat_type.strip())].append(
             {
                 "application_id": application_id,
                 "applicant_nric": main_applicant_nric,
@@ -269,168 +280,91 @@ def fetch_ballot_chances(applications):
             }
         )
 
-    if not payload_rows:
+    groups = [
+        {
+            "town_name": town_name,
+            "flat_type": flat_type,
+            "applications": rows,
+        }
+        for (town_name, flat_type), rows in sorted(grouped_rows.items(), key=lambda item: (item[0][0], item[0][1]))
+    ]
+
+    if not groups:
         log_action("No valid applications for chance lookup", chance_request_count=0)
         return {}
 
-    log_action("Fetching ballot chances", chance_request_count=len(payload_rows))
+    log_action("Fetching ballot chances", chance_group_count=len(groups))
     _, payload = request_json(
-        "GET",
+        "POST",
         f"{FLAT_SELECTION_SERVICE_URL}/flat-selection/chances",
-        params={"applications": json.dumps(payload_rows, separators=(",", ":"))},
+        json_body={"groups": groups},
         allowed_statuses=(200,),
     )
 
-    rows = payload.get("data")
-    if not isinstance(rows, list):
+    data = payload.get("data")
+    raw_groups = data.get("groups") if isinstance(data, dict) else None
+    if not isinstance(raw_groups, list):
         raise BallotOrchestrationError(
-            "Flat selection chance endpoint returned an invalid payload.",
+            "Flat selection chance endpoint returned an invalid grouped payload.",
             502,
         )
 
     chance_map = {}
-    for row in rows:
-        if not isinstance(row, dict):
+    for group in raw_groups:
+        if not isinstance(group, dict):
             continue
-
-        application_id = row.get("application_id")
-        final_chance = row.get("final_chance")
-
-        if not is_positive_int(application_id):
+        rows = group.get("results")
+        if not isinstance(rows, list):
             continue
-        if not is_positive_int(final_chance):
-            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
 
-        chance_map[application_id] = {
-            "final_chance": final_chance,
-        }
+            application_id = row.get("application_id")
+            base_chance = row.get("base_chance")
+            extra_chance = row.get("extra_chance")
+            final_chance = row.get("final_chance")
+
+            if not is_positive_int(application_id):
+                continue
+            if not is_positive_int(final_chance):
+                continue
+
+            chance_map[application_id] = {
+                "base_chance": base_chance if isinstance(base_chance, int) and base_chance >= 0 else None,
+                "extra_chance": extra_chance if isinstance(extra_chance, int) and extra_chance >= 0 else None,
+                "final_chance": final_chance,
+            }
 
     log_action("Fetched ballot chances", chance_result_count=len(chance_map))
     return chance_map
 
 
-# Validates application record.
-def validate_application_record(application):
-    """Validate one submitted application via validate-eligibility service."""
-    application_id = application.get("application_id")
-    main_applicant_nric = normalise_nric(application.get("main_applicant_nric"))
-    co_applicant_nric = get_co_applicant_nric(application)
-
-    reasons = []
-    if not is_positive_int(application_id):
-        reasons.append("application_id is missing or invalid.")
-    if main_applicant_nric is None:
-        reasons.append("main_applicant_nric is missing.")
-
-    if reasons:
-        log_action(
-            "Skipped validate-eligibility call due to invalid application payload",
-            level=logging.WARNING,
-            application_id=application_id,
-            reason_count=len(reasons),
-        )
-        return {
-            "application_id": application_id,
-            "main_applicant_nric": main_applicant_nric,
-            "co_applicant_nric": co_applicant_nric,
-            "eligible": False,
-            "ineligibility_reasons": reasons,
-            "application_update": {
-                "attempted": False,
-                "updated": False,
-                "status_code": None,
-                "message": "Validation skipped due to invalid application payload.",
-            },
-            "validation_status_code": 400,
-        }
-
-    status_code, payload = request_json(
-        "GET",
-        f"{VALIDATE_ELIGIBILITY_SERVICE_URL}/validate-eligibility",
-        params={
-            "application_id": application_id,
-            "main_applicant_nric": main_applicant_nric,
-            "co_applicant_nric": co_applicant_nric,
-        },
-        allowed_statuses=(200, 400, 404),
-    )
-
-    if status_code in (400, 404):
-        error_message = payload.get("error") or payload.get("message") or "Validation request rejected."
-        details = payload.get("details") if isinstance(payload.get("details"), list) else []
-        reasons = [error_message] if isinstance(error_message, str) else ["Validation request rejected."]
-        reasons.extend(item for item in details if isinstance(item, str))
-        log_action(
-            "Validate-eligibility request was rejected",
-            level=logging.WARNING,
-            application_id=application_id,
-            status_code=status_code,
-            reason_count=len(reasons),
-        )
-
-        return {
-            "application_id": application_id,
-            "main_applicant_nric": main_applicant_nric,
-            "co_applicant_nric": co_applicant_nric,
-            "eligible": False,
-            "ineligibility_reasons": reasons,
-            "application_update": {
-                "attempted": False,
-                "updated": False,
-                "status_code": status_code,
-                "message": "Validate-eligibility request failed for this application.",
-            },
-            "validation_status_code": status_code,
-        }
-
-    eligible = payload.get("eligible")
-    if not isinstance(eligible, bool):
-        raise BallotOrchestrationError(
-            f"Validate-eligibility service returned an invalid payload for application {application_id}.",
-            502,
-        )
-
-    ineligibility_reasons = payload.get("ineligibility_reasons")
-    if not isinstance(ineligibility_reasons, list):
-        ineligibility_reasons = []
-    ineligibility_reasons = [reason for reason in ineligibility_reasons if isinstance(reason, str)]
-
-    application_update = payload.get("application_update")
-    if not isinstance(application_update, dict):
-        application_update = {
-            "attempted": False,
-            "updated": False,
-            "status_code": None,
-            "message": "No application update metadata returned.",
-        }
-
-    log_action(
-        "Validated submitted application",
-        level=logging.DEBUG,
-        application_id=application_id,
-        eligible=eligible,
-        ineligibility_reason_count=len(ineligibility_reasons),
-        application_update_attempted=bool(application_update.get("attempted")),
-        application_update_updated=bool(application_update.get("updated")),
-    )
-
+def build_validation_skip_result(application, reasons):
+    """Build a consistent validation result when a record cannot be sent upstream."""
+    application_id = application.get("application_id") if isinstance(application, dict) else None
+    main_applicant_nric = normalise_nric(application.get("main_applicant_nric")) if isinstance(application, dict) else None
+    co_applicant_nric = get_co_applicant_nric(application) if isinstance(application, dict) else None
     return {
         "application_id": application_id,
         "main_applicant_nric": main_applicant_nric,
         "co_applicant_nric": co_applicant_nric,
-        "eligible": eligible,
-        "ineligibility_reasons": ineligibility_reasons,
-        "application_update": application_update,
-        "validation_status_code": status_code,
+        "eligible": False,
+        "ineligibility_reasons": reasons,
+        "application_update": {
+            "attempted": False,
+            "updated": False,
+            "status_code": 400,
+            "message": "Validation skipped due to invalid application payload.",
+        },
+        "validation_status_code": 400,
     }
 
 
-# Validates submitted applications.
-def validate_submitted_applications(applications):
-    """Validate all submitted applications and collect ineligible outcomes."""
-    log_action("Running validation pass for submitted applications", application_count=len(applications))
-    results = []
-    ineligible_rows = []
+def build_validation_groups(applications, projects_by_id):
+    """Group validation payload rows by town_name and flat_type for bulk validation."""
+    grouped_rows = defaultdict(list)
+    local_results = []
     warnings = []
 
     for application in applications:
@@ -438,10 +372,130 @@ def validate_submitted_applications(applications):
             warnings.append("Skipped one non-object application record during validation.")
             continue
 
-        result = validate_application_record(application)
-        results.append(result)
+        application_id = application.get("application_id")
+        main_applicant_nric = normalise_nric(application.get("main_applicant_nric"))
+        co_applicant_nric = get_co_applicant_nric(application)
+        project_id = application.get("project_id")
+        flat_type = application.get("flat_type")
 
-        if result["eligible"]:
+        reasons = []
+        if not is_positive_int(application_id):
+            reasons.append("application_id is missing or invalid.")
+        if main_applicant_nric is None:
+            reasons.append("main_applicant_nric is missing.")
+        if not isinstance(project_id, int):
+            reasons.append("project_id is missing or invalid.")
+        if not isinstance(flat_type, str) or not flat_type.strip():
+            reasons.append("flat_type is missing.")
+
+        project = projects_by_id.get(project_id) if isinstance(project_id, int) else None
+        town_name = str(project.get("town_name") or "").strip() if isinstance(project, dict) else ""
+        if not town_name:
+            reasons.append("town_name could not be resolved from project data.")
+
+        if reasons:
+            local_results.append(build_validation_skip_result(application, reasons))
+            continue
+
+        grouped_rows[(town_name, flat_type.strip())].append(
+            {
+                "application_id": application_id,
+                "main_applicant_nric": main_applicant_nric,
+                "co_applicant_nric": co_applicant_nric,
+            }
+        )
+
+    groups = [
+        {
+            "town_name": town_name,
+            "flat_type": flat_type,
+            "applications": rows,
+        }
+        for (town_name, flat_type), rows in sorted(grouped_rows.items(), key=lambda item: (item[0][0], item[0][1]))
+    ]
+    return groups, local_results, warnings
+
+
+# Validates submitted applications.
+def validate_submitted_applications(applications, exercise_projects):
+    """Validate all submitted applications in grouped batches and collect ineligible outcomes."""
+    log_action("Running validation pass for submitted applications", application_count=len(applications))
+    projects_by_id = {
+        item.get("project_id"): item
+        for item in exercise_projects
+        if isinstance(item, dict) and isinstance(item.get("project_id"), int)
+    }
+    results = []
+    ineligible_rows = []
+    warnings = []
+
+    groups, local_results, local_warnings = build_validation_groups(applications, projects_by_id)
+    results.extend(local_results)
+    warnings.extend(local_warnings)
+
+    for start in range(0, len(groups), VALIDATION_BATCH_SIZE):
+        batch_groups = groups[start:start + VALIDATION_BATCH_SIZE]
+        _, payload = request_json(
+            "POST",
+            f"{VALIDATE_ELIGIBILITY_SERVICE_URL}/validate-eligibility/bulk",
+            json_body={"groups": batch_groups},
+            allowed_statuses=(200,),
+        )
+
+        bulk_groups = payload.get("groups")
+        if not isinstance(bulk_groups, list):
+            raise BallotOrchestrationError(
+                "Validate-eligibility bulk endpoint returned an invalid grouped payload.",
+                502,
+            )
+
+        top_level_warnings = payload.get("warnings")
+        if isinstance(top_level_warnings, list):
+            warnings.extend(item for item in top_level_warnings if isinstance(item, str))
+
+        expected_group_keys = {
+            (group["town_name"], group["flat_type"])
+            for group in batch_groups
+        }
+        seen_group_keys = set()
+
+        for group in bulk_groups:
+            if not isinstance(group, dict):
+                continue
+            town_name = group.get("town_name")
+            flat_type = group.get("flat_type")
+            if not isinstance(town_name, str) or not isinstance(flat_type, str):
+                continue
+
+            seen_group_keys.add((town_name, flat_type))
+
+            group_warnings = group.get("warnings")
+            if isinstance(group_warnings, list):
+                warnings.extend(
+                    f"[{town_name} / {flat_type}] {item}"
+                    for item in group_warnings
+                    if isinstance(item, str)
+                )
+
+            group_results = group.get("results")
+            if not isinstance(group_results, list):
+                raise BallotOrchestrationError(
+                    "Validate-eligibility bulk endpoint returned an invalid group results payload.",
+                    502,
+                )
+
+            results.extend(item for item in group_results if isinstance(item, dict))
+
+        missing_groups = sorted(expected_group_keys - seen_group_keys)
+        if missing_groups:
+            raise BallotOrchestrationError(
+                "Validate-eligibility bulk endpoint did not return all requested groups.",
+                502,
+                details=[f"Missing validation group for town '{town_name}' flat_type '{flat_type}'." for town_name, flat_type in missing_groups],
+            )
+
+    for result in results:
+        if result.get("eligible"):
             continue
 
         ineligible_row = {
@@ -470,6 +524,8 @@ def validate_submitted_applications(applications):
         validated_count=len(results),
         ineligible_count=len(ineligible_rows),
         warning_count=len(warnings),
+        batch_size=VALIDATION_BATCH_SIZE,
+        validation_group_count=len(groups),
     )
 
     return results, ineligible_rows, warnings
@@ -630,6 +686,28 @@ def create_flat_selection_entries_bulk(records, town_name=None, flat_type=None):
         }
 
     return result_map
+
+
+# Detects incomplete flat-selection writes for one project result.
+def project_has_flat_selection_failures(project_result):
+    if not isinstance(project_result, dict):
+        return False
+
+    entries = project_result.get("entries")
+    if not isinstance(entries, list):
+        return False
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        flat_selection = entry.get("flat_selection")
+        if not isinstance(flat_selection, dict):
+            continue
+        if flat_selection.get("created"):
+            continue
+        return True
+
+    return False
 
 
 # Processes project.
@@ -1020,7 +1098,8 @@ def execute_ballot_run(exercise_id, trigger_source="manual", audit_id=None, skip
             application_count=len(initial_candidate_applications),
         )
         validation_results, ineligible_applications, validation_warnings = validate_submitted_applications(
-            initial_candidate_applications
+            initial_candidate_applications,
+            exercise_projects,
         )
         all_warnings.extend(validation_warnings)
         log_action(
@@ -1031,34 +1110,31 @@ def execute_ballot_run(exercise_id, trigger_source="manual", audit_id=None, skip
             validation_warning_count=len(validation_warnings),
         )
 
-        # After validation updates ineligible records via application service,
-        # fetch ballot candidates again to continue only with eligible applications.
-        candidate_applications = fetch_ballot_candidate_applications(exercise_id)
+        # Filter out ineligible applications from the initial fetch (no second fetch needed)
         ineligible_application_ids = {
             row.get("application_id")
             for row in ineligible_applications
             if isinstance(row, dict) and is_positive_int(row.get("application_id"))
         }
-        if ineligible_application_ids:
-            pre_filter_count = len(candidate_applications)
-            candidate_applications = [
-                application
-                for application in candidate_applications
-                if not (
-                    isinstance(application, dict)
-                    and is_positive_int(application.get("application_id"))
-                    and application.get("application_id") in ineligible_application_ids
-                )
-            ]
-            filtered_count = pre_filter_count - len(candidate_applications)
-            if filtered_count > 0:
-                log_action(
-                    "Filtered ineligible applications from post-validation ballot candidates",
-                    run_id=run_id,
-                    ineligible_id_count=len(ineligible_application_ids),
-                    filtered_count=filtered_count,
-                )
-        chance_map = fetch_ballot_chances(candidate_applications)
+        pre_filter_count = len(initial_candidate_applications)
+        candidate_applications = [
+            application
+            for application in initial_candidate_applications
+            if not (
+                isinstance(application, dict)
+                and is_positive_int(application.get("application_id"))
+                and application.get("application_id") in ineligible_application_ids
+            )
+        ]
+        filtered_count = pre_filter_count - len(candidate_applications)
+        if filtered_count > 0:
+            log_action(
+                "Filtered ineligible applications for ballot processing",
+                run_id=run_id,
+                ineligible_id_count=len(ineligible_application_ids),
+                filtered_count=filtered_count,
+            )
+        chance_map = fetch_ballot_chances(candidate_applications, exercise_projects)
         log_action(
             "Prepared post-validation workload",
             run_id=run_id,
@@ -1095,6 +1171,7 @@ def execute_ballot_run(exercise_id, trigger_source="manual", audit_id=None, skip
         totals["validated_count"] = len(validation_results)
         totals["ineligible_count"] = len(ineligible_applications)
         totals["eligible_after_validation_count"] = len(candidate_applications)
+        flat_selection_failure_messages = []
 
         for project in sorted(exercise_projects, key=lambda item: int(item.get("project_id", 0))):
             project_id = project.get("project_id")
@@ -1114,6 +1191,11 @@ def execute_ballot_run(exercise_id, trigger_source="manual", audit_id=None, skip
             all_warnings.extend(project_warnings)
             project_results.append(project_result)
 
+            if project_has_flat_selection_failures(project_result):
+                flat_selection_failure_messages.append(
+                    f"Flat-selection writes were incomplete for project {project_id} ({project_result['project_name']})."
+                )
+
             totals["submitted_count"] += project_result["submitted_count"]
             totals["queue_assigned_count"] += project_result["queue_assigned_count"]
             totals["flat_selection_entries_created"] += project_result["flat_selection_entries_created"]
@@ -1125,6 +1207,13 @@ def execute_ballot_run(exercise_id, trigger_source="manual", audit_id=None, skip
                 project_submitted_count=project_result["submitted_count"],
                 project_queue_assigned_count=project_result["queue_assigned_count"],
                 project_flat_selection_entries_created=project_result["flat_selection_entries_created"],
+            )
+
+        if flat_selection_failure_messages:
+            raise BallotOrchestrationError(
+                "Ballot run could not be completed because one or more flat-selection queue entries were not created.",
+                status_code=502,
+                details=flat_selection_failure_messages,
             )
 
         if manage_audit and isinstance(audit_id, int):

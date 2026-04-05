@@ -358,6 +358,9 @@ export async function demoForceApplyBtoSuccess(
     `/apply-bto/demo-force-success/${encodeURIComponent(merchantTxnRef)}`,
     undefined,
     {
+      headers: {
+        apikey: PROCESS_BALLOT_API_KEY,
+      },
       validateStatus: () => true,
     },
   )

@@ -115,6 +115,14 @@ function resetApplication() {
   showResetModal.value = false
   showSubmissionSummary.value = false
 }
+
+function startFreshApplication() {
+  applicationStore.beginNewApplication()
+  retrieveMainSuccess.value = false
+  retrieveMainError.value = ''
+  showResetModal.value = false
+  showSubmissionSummary.value = false
+}
 </script>
 
 <template>
@@ -125,6 +133,16 @@ function resetApplication() {
     </div>
 
     <section class="form-section">
+      <div v-if="isCurrentSubmitted" class="submitted-banner">
+        <div>
+          <strong>Current application is in submitted mode</strong>
+          <p>This page is read-only because the store is still pointing at your submitted application.</p>
+        </div>
+        <button class="btn btn-secondary" type="button" @click="startFreshApplication">
+          Start Fresh Application
+        </button>
+      </div>
+
       <div class="form-section__header">
         <div>
           <div class="form-section__title-row">
@@ -676,6 +694,23 @@ function resetApplication() {
   font-size: 0.9rem;
   font-weight: 600;
   color: rgba(29, 29, 31, 0.6);
+}
+
+.submitted-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 18px;
+  margin-bottom: 18px;
+  border: 1px solid rgba(200, 16, 46, 0.18);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(200, 16, 46, 0.06), rgba(255, 255, 255, 0.96));
+}
+
+.submitted-banner p {
+  margin: 6px 0 0;
+  color: rgba(29, 29, 31, 0.7);
 }
 
 .form-section + .form-section {

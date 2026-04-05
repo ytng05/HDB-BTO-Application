@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta
-import json
 import os
 
 from flask import Flask, jsonify, request
@@ -281,6 +280,8 @@ def compute_ballot_chances(application_id, applicant_nric, co_applicant_nric=Non
 
     return {
         "application_id": application_id,
+        "base_chance": base_chance,
+        "extra_chance": extra_chance,
         "final_chance": final_chance,
     }
 
@@ -598,72 +599,91 @@ def update_status(selection_id):
 
 
 # Gets ballot chances.
-@app.route("/flat-selection/chances", methods=["GET"])
+@app.route("/flat-selection/chances", methods=["POST"])
 def get_ballot_chances():
-    applications_raw = request.args.get("applications")
-    if not isinstance(applications_raw, str) or not applications_raw.strip():
-        return jsonify({
-            "code": 400,
-            "message": "applications query parameter is required and must be a JSON array string.",
-        }), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"code": 400, "message": "Request body must be a JSON object."}), 400
 
-    try:
-        applications = json.loads(applications_raw)
-    except json.JSONDecodeError:
-        return jsonify({
-            "code": 400,
-            "message": "applications must be valid JSON.",
-        }), 400
+    groups = payload.get("groups")
+    if not isinstance(groups, list) or not groups:
+        return jsonify({"code": 400, "message": "groups is required and must be a non-empty array."}), 400
 
-    if not isinstance(applications, list) or not applications:
-        return jsonify({"code": 400, "message": "applications must be a non-empty array."}), 400
+    top_level_warnings = []
+    grouped_results = []
+    now = datetime.utcnow()
 
-    errors = []
-    cleaned = []
-    seen_application_ids = set()
-    for index, item in enumerate(applications):
-        if not isinstance(item, dict):
-            errors.append(f"applications[{index}] must be an object.")
+    for group_index, group in enumerate(groups):
+        if not isinstance(group, dict):
+            top_level_warnings.append(f"groups[{group_index}] must be an object.")
             continue
 
-        application_id = parse_positive_int(item.get("application_id"))
-        applicant_nric = normalise_nric(item.get("applicant_nric") or item.get("main_applicant_nric"))
-        co_applicant_nric = normalise_nric(item.get("co_applicant_nric"))
+        town_name = group.get("town_name")
+        flat_type = group.get("flat_type")
+        applications = group.get("applications")
+        if not isinstance(applications, list) or not applications:
+            top_level_warnings.append(f"groups[{group_index}].applications must be a non-empty array.")
+            continue
 
-        if application_id is None:
-            errors.append(f"applications[{index}].application_id must be a positive integer.")
-        if applicant_nric is None:
-            errors.append(
-                f"applications[{index}] must include applicant_nric (or main_applicant_nric) as a non-empty string."
-            )
-        if application_id in seen_application_ids:
-            errors.append(f"Duplicate application_id found: {application_id}.")
+        errors = []
+        cleaned = []
+        seen_application_ids = set()
+        for index, item in enumerate(applications):
+            if not isinstance(item, dict):
+                errors.append(f"applications[{index}] must be an object.")
+                continue
 
-        if application_id is not None and applicant_nric is not None and application_id not in seen_application_ids:
-            seen_application_ids.add(application_id)
-            cleaned.append(
-                {
-                    "application_id": application_id,
-                    "applicant_nric": applicant_nric,
-                    "co_applicant_nric": co_applicant_nric,
-                }
-            )
+            application_id = parse_positive_int(item.get("application_id"))
+            applicant_nric = normalise_nric(item.get("applicant_nric") or item.get("main_applicant_nric"))
+            co_applicant_nric = normalise_nric(item.get("co_applicant_nric"))
 
-    if errors:
-        return jsonify({"code": 400, "message": "Validation error.", "errors": errors}), 400
+            if application_id is None:
+                errors.append(f"applications[{index}].application_id must be a positive integer.")
+            if applicant_nric is None:
+                errors.append(
+                    f"applications[{index}] must include applicant_nric (or main_applicant_nric) as a non-empty string."
+                )
+            if application_id in seen_application_ids:
+                errors.append(f"Duplicate application_id found: {application_id}.")
 
-    now = datetime.utcnow()
-    results = [
-        compute_ballot_chances(
-            application_id=item["application_id"],
-            applicant_nric=item["applicant_nric"],
-            co_applicant_nric=item["co_applicant_nric"],
-            now=now,
+            if application_id is not None and applicant_nric is not None and application_id not in seen_application_ids:
+                seen_application_ids.add(application_id)
+                cleaned.append(
+                    {
+                        "application_id": application_id,
+                        "applicant_nric": applicant_nric,
+                        "co_applicant_nric": co_applicant_nric,
+                    }
+                )
+
+        if errors:
+            return jsonify({"code": 400, "message": "Validation error.", "errors": errors}), 400
+
+        grouped_results.append(
+            {
+                "town_name": town_name if isinstance(town_name, str) else None,
+                "flat_type": flat_type if isinstance(flat_type, str) else None,
+                "count": len(cleaned),
+                "results": [
+                    compute_ballot_chances(
+                        application_id=item["application_id"],
+                        applicant_nric=item["applicant_nric"],
+                        co_applicant_nric=item["co_applicant_nric"],
+                        now=now,
+                    )
+                    for item in cleaned
+                ],
+            }
         )
-        for item in cleaned
-    ]
 
-    return jsonify({"code": 200, "data": results}), 200
+    return jsonify({
+        "code": 200,
+        "data": {
+            "count": sum(group["count"] for group in grouped_results),
+            "warnings": top_level_warnings,
+            "groups": grouped_results,
+        },
+    }), 200
 
 
 if __name__ == "__main__":

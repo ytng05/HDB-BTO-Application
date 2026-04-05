@@ -642,6 +642,7 @@ def list_applications():
         required: false
         schema:
           type: string
+        description: Filters by application status.
     responses:
       200:
         description: Applications retrieved successfully

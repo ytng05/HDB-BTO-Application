@@ -28,16 +28,26 @@ create_service() {
     -d "{\"url\": \"$url\"}" > /dev/null
 }
 
-# create_route <service-name> <route-name> <path-prefix>
-# strip_path=false so the full path is forwarded to the upstream service
+# create_route <service-name> <route-name> <path-or-regex> [methods-json]
+# strip_path=false so the full path is forwarded to the upstream service.
+# methods-json example: ["GET","POST"]
 create_route() {
   local service=$1
   local route=$2
   local path=$3
+  local methods_json=${4:-}
+
+  local payload
+  if [ -n "$methods_json" ]; then
+    payload="{\"paths\": [\"$path\"], \"strip_path\": false, \"methods\": $methods_json}"
+  else
+    payload="{\"paths\": [\"$path\"], \"strip_path\": false}"
+  fi
+
   echo "  Registering route:   $path -> $service"
   curl -sf -X PUT "$ADMIN/services/$service/routes/$route" \
     -H "Content-Type: application/json" \
-    -d "{\"paths\": [\"$path\"], \"strip_path\": false}" > /dev/null
+    -d "$payload" > /dev/null
 }
 
 # ─── Scenario 1: Apply for BTO ───────────────────────────────────────────────
@@ -45,43 +55,51 @@ echo ""
 echo "==> Scenario 1: Apply for BTO"
 
 create_service "apply-bto"    "http://apply-bto-service:5010"
-create_route   "apply-bto"    "apply-bto-route"    "/apply-bto"
+create_route   "apply-bto"    "apply-bto-initiate-route"       "/apply-bto/initiate"                        '["POST","OPTIONS"]'
+create_route   "apply-bto"    "apply-bto-complete-route"       "~/apply-bto/complete/[^/]+$"               '["POST","OPTIONS"]'
+create_route   "apply-bto"    "apply-bto-demo-force-route"     "~/apply-bto/demo-force-success/[^/]+$"     '["POST","OPTIONS"]'
 
 create_service "singpass"     "http://singpass-service:5007"
-create_route   "singpass"     "singpass-route"     "/singpass"
+create_route   "singpass"     "singpass-auth-login-route"       "/singpass/auth/login"                      '["GET","OPTIONS"]'
+create_route   "singpass"     "singpass-auth-callback-route"    "/singpass/auth/callback"                   '["GET","OPTIONS"]'
+create_route   "singpass"     "singpass-profile-route"          "/singpass/profile"                         '["GET","OPTIONS"]'
+create_route   "singpass"     "singpass-logout-route"           "/singpass/logout"                          '["POST","OPTIONS"]'
 
 create_service "nets-payment" "http://nets-payment-service:5003"
-create_route   "nets-payment" "nets-payment-route" "/payment"
+create_route   "nets-payment" "nets-payment-b2s-callback-route" "/payment/b2s-callback"                     '["GET","POST","OPTIONS"]'
+create_route   "nets-payment" "nets-payment-s2s-callback-route" "/payment/s2s-callback"                     '["POST","OPTIONS"]'
+create_route   "nets-payment" "nets-payment-abandon-route"      "~/payment/abandon/[^/]+$"                  '["POST","OPTIONS"]'
 
 create_service "document"     "http://document-service:5050"
-create_route   "document"     "document-extract-route" "/extract"
-create_route   "document"     "document-route"         "/documents"
+create_route   "document"     "document-extract-route"          "/extract"                                  '["POST","OPTIONS"]'
+create_route   "document"     "document-route"                  "/documents"                                '["GET","OPTIONS"]'
 
 # ─── Scenario 2: Ballot Run ──────────────────────────────────────────────────
 echo ""
 echo "==> Scenario 2: Ballot Run"
 
 create_service "process-ballot" "http://process-ballot-service:5011"
-create_route   "process-ballot" "process-ballot-route" "/process-ballot"
+create_route   "process-ballot" "process-ballot-run-route"      "/process-ballot/run"                       '["POST","OPTIONS"]'
 
 create_service "ballot-audit" "http://ballot-audit-service:5000"
-create_route   "ballot-audit" "ballot-audit-route" "/ballot-audits"
+create_route   "ballot-audit" "ballot-audit-list-create-route"  "/ballot-audits"                            '["GET","POST","OPTIONS"]'
+create_route   "ballot-audit" "ballot-audit-update-route"       "~/ballot-audits/[0-9]+$"                   '["PUT","OPTIONS"]'
 
 create_service "project"      "http://project-service:5012"
-create_route   "project"      "project-route"      "/projects"
+create_route   "project"      "project-list-route"              "/projects"                                 '["GET","OPTIONS"]'
 
 # ─── Scenario 3: Flat Selection ──────────────────────────────────────────────
 echo ""
 echo "==> Scenario 3: Flat Selection"
 
 create_service "flat"           "http://flat-service:5006"
-create_route   "flat"           "flat-route"           "/flats"
+create_route   "flat"           "flat-list-route"                  "/flats"                                   '["GET","OPTIONS"]'
 
 create_service "flat-selection" "http://flat-selection-service:5002"
-create_route   "flat-selection" "flat-selection-route" "/flat-selection"
+create_route   "flat-selection" "flat-selection-list-route"        "/flat-selection"                          '["GET","OPTIONS"]'
 
 create_service "application"    "http://application-service:5004"
-create_route   "application"    "application-route"    "/applications"
+create_route   "application"    "application-list-route"           "/applications"                            '["GET","OPTIONS"]'
 
 # ─── Plugins ─────────────────────────────────────────────────────────────────
 echo ""
@@ -143,7 +161,12 @@ curl -sf -X POST "$ADMIN/services/flat-selection/plugins" \
 # API key auth on process-ballot is optional for local demos.
 if [ "$ENABLE_PROCESS_BALLOT_KEY_AUTH" = "true" ]; then
   echo "  Plugin: key-auth on process-ballot"
-  curl -sf -X POST "$ADMIN/services/process-ballot/plugins" \
+  curl -sf -X POST "$ADMIN/routes/process-ballot-run-route/plugins" \
+    -H "Content-Type: application/json" \
+    -d '{"name": "key-auth"}' > /dev/null
+
+  echo "  Plugin: key-auth on apply-bto demo-force-success"
+  curl -sf -X POST "$ADMIN/routes/apply-bto-demo-force-route/plugins" \
     -H "Content-Type: application/json" \
     -d '{"name": "key-auth"}' > /dev/null
 
