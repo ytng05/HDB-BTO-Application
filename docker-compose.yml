@@ -128,6 +128,28 @@ services:
       HDB_PORTAL_URL: ${HDB_PORTAL_URL:-http://localhost:5173}
     restart: always
 
+  # Notification Service — RabbitMQ wrapper API
+  notification-api:
+    build:
+      context: ./cloudamqp
+      dockerfile: Dockerfile
+    container_name: notification_api
+    ports:
+      - "5005:5000"
+    env_file:
+      - ./cloudamqp/.env
+    restart: always
+
+  # Notification Service — RabbitMQ consumer + Twilio SMS
+  notification-consumer:
+    build:
+      context: ./cloudamqp
+      dockerfile: Dockerfile.consumer
+    container_name: notification_consumer
+    env_file:
+      - ./cloudamqp/.env
+    restart: always
+
 volumes:
   document_db_data:
   application_db_data:
