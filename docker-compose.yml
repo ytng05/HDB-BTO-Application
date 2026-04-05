@@ -334,3 +334,8 @@ volumes:
   flat_db_data:
   flat_selection_db_data:
   project_db_data:
+
+networks:
+  default:
+    name: esd-net
+    external: true
