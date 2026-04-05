@@ -396,6 +396,27 @@ def build_frontend_callback_url(
     return f"{base}{callback_path}?{urlencode(query)}"
 
 
+def build_public_base_url() -> str:
+    """Resolve the externally reachable base URL when behind Kong/reverse proxies."""
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", "").strip()
+    forwarded_host = request.headers.get("X-Forwarded-Host", "").strip()
+    forwarded_port = request.headers.get("X-Forwarded-Port", "").strip()
+
+    if forwarded_host:
+        proto = forwarded_proto or request.scheme or "http"
+        host = forwarded_host.split(",", 1)[0].strip()
+
+        # Kong may forward host without port. Preserve external port when provided.
+        if forwarded_port and ":" not in host:
+            default_port = "443" if proto == "https" else "80"
+            if forwarded_port != default_port:
+                host = f"{host}:{forwarded_port}"
+
+        return f"{proto}://{host}"
+
+    return request.host_url.rstrip("/")
+
+
 # ---------------------------------------------------------------------------
 # API Endpoints
 # ---------------------------------------------------------------------------
@@ -410,7 +431,7 @@ def singpass_auth_login():
     params = {
         "response_type": "code",
         "client_id": MOCKPASS_CLIENT_ID,
-        "redirect_uri": f"{request.host_url.rstrip('/')}/singpass/auth/callback",
+        "redirect_uri": f"{build_public_base_url()}/singpass/auth/callback",
         "scope": "openid",
         "state": state,
         "nonce": nonce,

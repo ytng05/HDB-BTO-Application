@@ -1,6 +1,6 @@
 ﻿"""NETS hosted-payment wrapper used by the local HDB demo app."""
 
-from flask import Flask, request, jsonify, redirect
+from flask import Flask, request, jsonify, redirect, has_request_context
 from flask_cors import CORS
 from dotenv import load_dotenv
 from flasgger import Swagger
@@ -71,15 +71,33 @@ def get_enets_query_url():
 
 
 #  Handles get b2s callback url for this service.
+def get_callback_base_url():
+    """Resolve callback base URL for local direct and Kong-proxied requests."""
+    configured = (NETS_CALLBACK_BASE or '').strip().rstrip('/')
+
+    # Respect explicit non-default callback base from env.
+    if configured and configured not in {'http://localhost:5003', 'http://127.0.0.1:5003'}:
+        return configured
+
+    if has_request_context():
+        forwarded_host = request.headers.get('X-Forwarded-Host', '').strip()
+        forwarded_proto = request.headers.get('X-Forwarded-Proto', '').strip() or request.scheme
+        if forwarded_host:
+            return f"{forwarded_proto}://{forwarded_host}"
+
+    return configured or 'http://localhost:5003'
+
+
+#  Handles get b2s callback url for this service.
 def get_b2s_callback_url():
     """Get the browser callback URL used in the hosted payment request."""
-    return NETS_B2S_CALLBACK_URL or f"{NETS_CALLBACK_BASE}/payment/b2s-callback"
+    return NETS_B2S_CALLBACK_URL or f"{get_callback_base_url()}/payment/b2s-callback"
 
 
 #  Handles get s2s callback url for this service.
 def get_s2s_callback_url():
     """Get the server callback URL used in the hosted payment request."""
-    return NETS_S2S_CALLBACK_URL or f"{NETS_CALLBACK_BASE}/payment/s2s-callback"
+    return NETS_S2S_CALLBACK_URL or f"{get_callback_base_url()}/payment/s2s-callback"
 
 
 #  Handles get request client ip for this service.

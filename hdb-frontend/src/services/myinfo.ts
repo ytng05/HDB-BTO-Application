@@ -1,7 +1,8 @@
 import type { MyInfoPersona } from '@/data/myinfoPersonas'
 import { withRetry } from '@/utils/http'
 
-const SINGPASS_API_URL = import.meta.env.VITE_SINGPASS_URL ?? 'http://localhost:5007'
+const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? 'http://localhost:8000'
+const SINGPASS_API_URL = import.meta.env.VITE_SINGPASS_URL ?? API_GATEWAY_URL
 const SINGPASS_SESSIONS_ENABLED = (import.meta.env.VITE_SINGPASS_USE_SESSIONS ?? 'true').toLowerCase() === 'true'
 const SESSION_CREDENTIALS: RequestCredentials = SINGPASS_SESSIONS_ENABLED ? 'include' : 'omit'
 

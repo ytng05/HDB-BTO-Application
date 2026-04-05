@@ -1,12 +1,14 @@
 #!/bin/bash
 # Kong Admin API setup script for esd-hdb
-# Run this AFTER kong/compose.yaml and docker-compose.yml are both up.
+# Run this AFTER docker-compose.yml is up.
 #
 # Usage:
 #   cd esd-hdb
+#   docker compose up --build -d
 #   bash kong/setup.sh
 
 ADMIN=http://localhost:8001
+ENABLE_PROCESS_BALLOT_KEY_AUTH=${ENABLE_PROCESS_BALLOT_KEY_AUTH:-true}
 
 # Wait for Kong Admin API to be ready
 echo "Waiting for Kong Admin API..."
@@ -51,6 +53,10 @@ create_route   "singpass"     "singpass-route"     "/singpass"
 create_service "nets-payment" "http://nets-payment-service:5003"
 create_route   "nets-payment" "nets-payment-route" "/payment"
 
+create_service "document"     "http://document-service:5050"
+create_route   "document"     "document-extract-route" "/extract"
+create_route   "document"     "document-route"         "/documents"
+
 # ─── Scenario 2: Ballot Run ──────────────────────────────────────────────────
 echo ""
 echo "==> Scenario 2: Ballot Run"
@@ -81,6 +87,34 @@ create_route   "application"    "application-route"    "/applications"
 echo ""
 echo "==> Applying plugins"
 
+# Remove previously-created global CORS plugins so reruns stay deterministic.
+for plugin_id in $(curl -s "$ADMIN/plugins?name=cors&size=1000" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for p in data.get('data', []):
+    if p.get('service') is None and p.get('route') is None and p.get('consumer') is None:
+        print(p['id'])
+"); do
+  echo "  Removing stale global cors plugin: $plugin_id"
+  curl -sf -X DELETE "$ADMIN/plugins/$plugin_id" > /dev/null
+done
+
+# Global CORS for browser requests from the Vue frontend through Kong.
+echo "  Plugin: global cors"
+curl -sf -X POST "$ADMIN/plugins" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "cors",
+    "config": {
+      "origins": ["http://localhost:5173"],
+      "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      "headers": ["Accept", "Authorization", "Content-Type", "Origin", "X-Requested-With", "apikey"],
+      "exposed_headers": ["Content-Length", "Content-Type"],
+      "credentials": true,
+      "max_age": 3600
+    }
+  }' > /dev/null
+
 # Rate-limit apply-bto: max 5 submissions/minute per IP (prevents duplicate submissions)
 echo "  Plugin: rate-limiting on apply-bto"
 curl -sf -X POST "$ADMIN/services/apply-bto/plugins" \
@@ -106,32 +140,50 @@ curl -sf -X POST "$ADMIN/services/flat-selection/plugins" \
     }
   }' > /dev/null
 
-# API key auth on process-ballot: only the cron job (ballot-audit-service) can call this
-echo "  Plugin: key-auth on process-ballot"
-curl -sf -X POST "$ADMIN/services/process-ballot/plugins" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "key-auth"}' > /dev/null
+# API key auth on process-ballot is optional for local demos.
+if [ "$ENABLE_PROCESS_BALLOT_KEY_AUTH" = "true" ]; then
+  echo "  Plugin: key-auth on process-ballot"
+  curl -sf -X POST "$ADMIN/services/process-ballot/plugins" \
+    -H "Content-Type: application/json" \
+    -d '{"name": "key-auth"}' > /dev/null
 
-# Create a consumer for the ballot-audit cron job and assign it an API key
-echo "  Consumer: ballot-cron-job"
-curl -sf -X PUT "$ADMIN/consumers/ballot-cron-job" \
-  -H "Content-Type: application/json" \
-  -d '{"username": "ballot-cron-job"}' > /dev/null
+  # Create a consumer for the ballot-audit cron job and assign it an API key
+  echo "  Consumer: ballot-cron-job"
+  curl -sf -X PUT "$ADMIN/consumers/ballot-cron-job" \
+    -H "Content-Type: application/json" \
+    -d '{"username": "ballot-cron-job"}' > /dev/null
 
-echo "  API key: ballot-cron-job-secret"
-curl -sf -X PUT "$ADMIN/consumers/ballot-cron-job/key-auth/ballot-cron-job-secret" \
-  -H "Content-Type: application/json" \
-  -d '{"key": "ballot-cron-job-secret"}' > /dev/null
+  echo "  API key: ballot-cron-job-secret"
+  curl -sf -X PUT "$ADMIN/consumers/ballot-cron-job/key-auth/ballot-cron-job-secret" \
+    -H "Content-Type: application/json" \
+    -d '{"key": "ballot-cron-job-secret"}' > /dev/null
+else
+  echo "  Skipping key-auth on process-ballot (ENABLE_PROCESS_BALLOT_KEY_AUTH=false)"
+fi
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
 echo ""
 echo "==> Kong setup complete. Registered services and routes:"
+echo "   Login entrypoint is: http://localhost:8000/singpass/auth/login"
 echo ""
 curl -s "$ADMIN/services" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 for s in data.get('data', []):
-    print(f\"  {s['name']:20s} -> {s['url']}\")
+  name = s.get('name', '<unnamed>')
+  upstream = s.get('url')
+  if not upstream:
+    protocol = s.get('protocol', 'http')
+    host = s.get('host', '')
+    port = s.get('port')
+    path = s.get('path') or ''
+    upstream = f'{protocol}://{host}'
+    if port:
+      upstream += f':{port}'
+    if path and not path.startswith('/'):
+      path = '/' + path
+    upstream += path
+  print(f\"  {name:20s} -> {upstream}\")
 "
 echo ""
 echo "Active routes:"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Building2, FileText, MapPinned, UserRound, LogIn } from 'lucide-vue-next'
+import { Building2, FileText, MapPinned, UserRound } from 'lucide-vue-next'
 import HeroCarousel from '@/components/HeroCarousel.vue'
 import BtoProjectCard from '@/components/BtoProjectCard.vue'
 import ApplicationStatusStepper from '@/components/ApplicationStatusStepper.vue'
@@ -403,12 +403,6 @@ function startApplicationFlow() {
   void router.push('/apply/details')
 }
 
-function redirectToMockPass() {
-  const singpassUrl = import.meta.env.VITE_SINGPASS_URL ?? 'http://localhost:5007'
-  const loginUrl = `${singpassUrl}/singpass/auth/login?redirect=${encodeURIComponent('/')}`
-  window.location.assign(loginUrl)
-}
-
 function openApplication(application: ApplicationRecord) {
   applicationStore.openApplication(application)
   void router.push('/apply/review')
@@ -485,14 +479,6 @@ watch(activeApplication, () => {
     <section v-if="!isLoggedIn" class="section home-hero">
       <div class="container">
         <HeroCarousel :slides="heroSlides" />
-
-        <div class="hero-actions">
-          <p class="hero-login-hint">Sign in with Singpass to continue or review the application saved on this device.</p>
-          <button class="btn btn-primary hero-login-button" type="button" @click="redirectToMockPass">
-            <LogIn :size="17" />
-            <span>Login with Singpass</span>
-          </button>
-        </div>
       </div>
     </section>
 
@@ -501,6 +487,7 @@ watch(activeApplication, () => {
         <div class="dashboard-header">
           <div>
             <p class="eyebrow">Applicant Dashboard</p>
+
             <h2 class="section-heading">Application status and next steps</h2>
             <p class="section-subtitle">
               This dashboard shows the application state currently saved in the portal for the signed-in applicant.
@@ -646,27 +633,6 @@ watch(activeApplication, () => {
 .home-hero {
   padding-top: 28px;
   padding-bottom: 48px;
-}
-
-.hero-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  margin-top: 20px;
-}
-
-.hero-login-hint {
-  margin: 0;
-  font-size: 0.96rem;
-  color: rgba(29, 29, 31, 0.6);
-  text-align: center;
-}
-
-.hero-login-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .dashboard-header {

@@ -1,4 +1,55 @@
 services:
+  kong-database:
+    image: postgres:17.4
+    container_name: kong_database
+    restart: always
+    environment:
+      POSTGRES_DB: kong
+      POSTGRES_USER: kong
+      POSTGRES_PASSWORD: password
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "kong"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - kong_pgdata:/var/lib/postgresql/data
+
+  kong-migration:
+    image: kong/kong-gateway:3.9
+    container_name: kong_migration
+    command: "kong migrations bootstrap"
+    restart: on-failure
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: password
+    depends_on:
+      - kong-database
+
+  kong:
+    image: kong/kong-gateway:3.9
+    container_name: kong_gateway
+    restart: always
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: password
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_ADMIN_GUI_URL: http://localhost:8002
+    depends_on:
+      - kong-migration
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+      - "8002:8002"
+
   document-db:
     image: mysql:8.0
     container_name: document_db
@@ -327,6 +378,7 @@ services:
     restart: always
 
 volumes:
+  kong_pgdata:
   document_db_data:
   application_db_data:
   hfe_application_db_data:

@@ -56,6 +56,12 @@ The repo currently includes NETS' public demo/sample UAT values so you can exerc
 docker compose up --build
 ```
 
+Bootstrap Kong services, routes, and plugins:
+
+```bash
+bash kong/setup.sh
+```
+
 This starts:
 - Document DB on port `3350`
 - Document service on `http://localhost:5050`
@@ -90,6 +96,14 @@ curl http://localhost:5003/payment/records
 
 ## 3. Start the Frontend
 
+Use gateway-first frontend settings so browser requests go through Kong:
+
+```bash
+cp .env.example .env
+```
+
+The root `.env` now includes both backend and frontend (`VITE_*`) settings, and defaults to `http://localhost:8000` for API and login flow.
+
 ```bash
 cd hdb-frontend
 npm install
@@ -97,6 +111,11 @@ npm run dev
 ```
 
 Open `http://localhost:5173` in your browser.
+
+Login path through Kong:
+- Frontend opens `http://localhost:8000/singpass/auth/login`
+- Kong routes to `singpass-service`
+- Wrapper redirects to MockPass and handles callback at `/singpass/auth/callback`
 
 ---
 

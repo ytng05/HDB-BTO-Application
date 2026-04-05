@@ -1,14 +1,17 @@
 import axios from 'axios'
 
-export const APPLY_BTO_URL = import.meta.env.VITE_APPLY_BTO_URL ?? 'http://localhost:5010'
-export const PROCESS_BALLOT_URL = import.meta.env.VITE_PROCESS_BALLOT_URL ?? 'http://localhost:5011'
-export const PROJECT_URL = import.meta.env.VITE_PROJECT_URL ?? 'http://localhost:5012'
-export const BALLOT_AUDIT_URL = import.meta.env.VITE_BALLOT_AUDIT_URL ?? 'http://localhost:5000'
-export const FLAT_SELECTION_URL = import.meta.env.VITE_FLAT_SELECTION_URL ?? 'http://localhost:5002'
-export const APPLICATION_URL = import.meta.env.VITE_APPLICATION_URL ?? 'http://localhost:5004'
-export const FLAT_URL = import.meta.env.VITE_FLAT_URL ?? 'http://localhost:5006'
-export const NETS_PAYMENT_URL = import.meta.env.VITE_NETS_PAYMENT_URL ?? 'http://localhost:5003'
-export const DOCUMENT_URL = import.meta.env.VITE_DOCUMENT_URL ?? 'http://localhost:5050'
+const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? 'http://localhost:8000'
+
+export const APPLY_BTO_URL = import.meta.env.VITE_APPLY_BTO_URL ?? API_GATEWAY_URL
+export const PROCESS_BALLOT_URL = import.meta.env.VITE_PROCESS_BALLOT_URL ?? API_GATEWAY_URL
+export const PROJECT_URL = import.meta.env.VITE_PROJECT_URL ?? API_GATEWAY_URL
+export const BALLOT_AUDIT_URL = import.meta.env.VITE_BALLOT_AUDIT_URL ?? API_GATEWAY_URL
+export const FLAT_SELECTION_URL = import.meta.env.VITE_FLAT_SELECTION_URL ?? API_GATEWAY_URL
+export const APPLICATION_URL = import.meta.env.VITE_APPLICATION_URL ?? API_GATEWAY_URL
+export const FLAT_URL = import.meta.env.VITE_FLAT_URL ?? API_GATEWAY_URL
+export const NETS_PAYMENT_URL = import.meta.env.VITE_NETS_PAYMENT_URL ?? API_GATEWAY_URL
+export const DOCUMENT_URL = import.meta.env.VITE_DOCUMENT_URL ?? API_GATEWAY_URL
+const PROCESS_BALLOT_API_KEY = import.meta.env.VITE_PROCESS_BALLOT_API_KEY ?? 'ballot-cron-job-secret'
 
 type ApiMessage = string | string[]
 
@@ -385,9 +388,16 @@ export async function abandonNetsPayment(
 export async function runProcessBallot(
   payload: ProcessBallotRunRequest,
 ): Promise<{ status: number; data: ProcessBallotRunResponse }> {
-  const response = await processBallotApi.post<ProcessBallotRunResponse>('/process-ballot/run', payload, {
-    validateStatus: () => true,
-  })
+  const response = await processBallotApi.post<ProcessBallotRunResponse>(
+    '/process-ballot/run',
+    payload,
+    {
+      headers: {
+        apikey: PROCESS_BALLOT_API_KEY,
+      },
+      validateStatus: () => true,
+    },
+  )
 
   return {
     status: response.status,

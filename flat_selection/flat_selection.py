@@ -323,7 +323,7 @@ def get_all():
     selections = db.session.scalars(query).all()
 
     if not selections:
-        return jsonify({"code": 404, "message": "No flat selections found."}), 404
+        return jsonify({"code": 200, "data": []}), 200
 
     return jsonify({"code": 200, "data": [selection.json() for selection in selections]}), 200
 
@@ -595,33 +595,6 @@ def update_status(selection_id):
         return jsonify({"code": 500, "message": f"Error updating status: {exc}"}), 500
 
     return jsonify({"code": 200, "data": selection.json()}), 200
-    applicant_nric = normalise_nric(request.args.get("applicant_nric"))
-    active_raw = request.args.get("active")
-    active = to_boolean(active_raw)
-
-    if active_raw is not None and active is None:
-        return jsonify({"code": 400, "message": "active must be true or false when provided."}), 400
-
-    query = db.select(ForfeitPenalty)
-    if applicant_nric:
-        query = query.join(
-            FlatSelection,
-            FlatSelection.selection_id == ForfeitPenalty.selection_id,
-        ).where(build_pair_condition(FlatSelection, applicant_nric, None))
-
-    now = datetime.utcnow()
-    if active is True:
-        query = query.where(ForfeitPenalty.penalty_end_at > now)
-    elif active is False:
-        query = query.where(ForfeitPenalty.penalty_end_at <= now)
-
-    penalties = db.session.scalars(
-        query.order_by(ForfeitPenalty.penalty_start_at.desc(), ForfeitPenalty.penalty_id.desc())
-    ).all()
-    if not penalties:
-        return jsonify({"code": 404, "message": "No forfeit penalty records found."}), 404
-
-    return jsonify({"code": 200, "data": [penalty.json(now=now) for penalty in penalties]}), 200
 
 
 # Gets ballot chances.

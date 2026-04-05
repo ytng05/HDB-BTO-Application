@@ -249,6 +249,55 @@ def _find_multiline_value(pattern, text, flags=re.IGNORECASE):
     return value or None
 
 
+# what this function does for the service: Handles find labelled value for this service.
+def _find_label_value(label, text, stop_labels=None):
+    """Extract a value after a label until the next known label or line ending."""
+    if not label:
+        return None
+
+    stop_labels = stop_labels or []
+    stop_pattern = "|".join(re.escape(item) for item in stop_labels if item)
+    if stop_pattern:
+        pattern = rf"{label}\s*[:\s]+\s*(.+?)(?=\s+(?:{stop_pattern})\s*[:\s]+|$)"
+        return _find_multiline_value(pattern, text, re.IGNORECASE | re.DOTALL)
+
+    return _find_multiline_value(rf"{label}\s*[:\s]+\s*(.+?)(?:$)", text, re.IGNORECASE | re.DOTALL)
+
+
+# what this function does for the service: Handles find amount between labels for this service.
+def _find_money_between_labels(label, text, stop_labels=None):
+    raw = _find_label_value(label, text, stop_labels=stop_labels)
+    if not raw:
+        return None
+
+    try:
+        return float(re.sub(r"[^\d.]", "", raw))
+    except ValueError:
+        return None
+
+
+# what this function does for the service: Handles normalize text token for this service.
+def _clean_inline_value(value):
+    if not value:
+        return None
+
+    value = re.sub(r"\s{2,}", " ", value).strip(" :-")
+    return value or None
+
+
+# what this function does for the service: Handles normalize document reference for this service.
+def _normalize_reference_value(value):
+    cleaned = _clean_inline_value(value)
+    if not cleaned:
+        return None
+
+    cleaned = cleaned.replace("\n", " ")
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    if cleaned.upper().startswith("CPF-"):
+        cleaned = cleaned.replace(" ", "")
+    return cleaned
+
+
 # what this function does for the service: Handles extract standard income for this service.
 def extract_standard_income(text):
     if re.search(r"CPF\s+CONTRIBUTION\s+HISTORY", text, re.IGNORECASE):
@@ -266,17 +315,23 @@ def extract_standard_income(text):
             text,
             re.IGNORECASE | re.DOTALL,
         )
+        or _find_multiline_value(
+            r"Employer\s*/\s*Source[:\s]*(.+?)(?=\s+(?:UEN\s*/\s*Tax\s*Ref|Employer\s+UEN|Employment Type|Designation|Occupation|Years of Service)\s*[:\s]+|$)",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
         or _find(r"Employment Income\s*\(([^)]+)\)", text)
     )
 
     full_name = _find_multiline_value(
-        r"(?:Full Name(?: \(as per NRIC\))?|Employee Name)[:\s]*(.+?)(?:\n(?:Statement Reference|Application Ref(?:erence)?(?: No\.?)?|NRIC|Date of Birth|Date of Issue|Employer|Designation)|$)",
+        r"(?:Full Name(?: \(as per NRIC\))?|Employee Name)[:\s]*(.+?)(?:\n(?:Statement Reference|Reference No\.?|Application Ref(?:erence)?(?: No\.?)?|NRIC|Date of Birth|Date of Issue|Employer|Designation)|$)",
         text,
         re.IGNORECASE | re.DOTALL,
     )
 
     total_gross = (
         _find_money(r"TOTAL GROSS INCOME[^:]*:\s+S?\$?\s*([\d,]+\.?\d*)", text)
+        or _find_money(r"Total Annual Gross Income\s*\(\d{4}\)[:\s]+S?\$?\s*([\d,]+\.?\d*)", text)
         or _find_money(r"TOTAL INCOME[:\s]+([\d,]+\.?\d*)", text)
         or _find_money(r"Total Gross Revenue.*?:\s+S?\$?\s*([\d,]+\.?\d*)", text)
     )
@@ -288,11 +343,20 @@ def extract_standard_income(text):
     )
 
     doc_ref = (
+        _normalize_reference_value(_find_label_value(
+            r"Reference No\.?",
+            text,
+            stop_labels=["NRIC", "Date of Issue", "Date of Birth", "Period Covered", "Nationality"],
+        ))
+        or
         _find(r"Statement Reference[:\s]+(CPF-[\w-]+)", text)
         or _find(r"(?:Document Ref|NOA Reference|Application Ref(?:erence)?(?: No\.?)?)[:\s]+([\w-]+)", text)
+        or _find(r"Ref[:\s]+([A-Z0-9-]+)", text)
     )
 
     period = (
+        _find(r"Period Covered[:\s]+([^\n]+?)(?=\s+(?:Nationality|Residential Status|EMPLOYER|Employer)|$)", text)
+        or
         _find_multiline_value(
             r"Statement Period[:\s]*(.+?)(?:\n(?:Nationality|Resid(?:ency|ential)\s+Status|EMPLOYER DETAILS)|$)",
             text,
@@ -306,12 +370,15 @@ def extract_standard_income(text):
     return {
         "document_variant": document_variant,
         "full_name": full_name,
-        "nric": _find(r"NRIC(?:/UIN)?(?:\s+(?:Number|No\.?))?[:\s]+([A-Z]\d{7}[A-Z])", text),
+        "nric": _find(r"NRIC(?:\s*/\s*UIN)?(?:\s+(?:Number|No\.?))?[:\s]+([A-Z]\d{7}[A-Z])", text),
         "date_of_birth": _find(r"Date of Birth[:\s]+(\d{1,2}\s+\w+\s+\d{4})", text),
         "nationality": _find(r"Nationality[:\s]+([^\n]+)", text),
         "residency_status": _find(r"Resid(?:ency|ential)\s+Status[:\s]+([^\n]+)", text),
         "employer_name": " ".join(employer_raw.split()) if employer_raw else None,
-        "employer_uen": _find(r"Employer UEN[:\s]+(\w+)", text),
+        "employer_uen": (
+            _find(r"Employer UEN[:\s]+(\w+)", text)
+            or _find(r"UEN\s*/\s*Tax\s*Ref[:\s]+([A-Z0-9]+)", text)
+        ),
         "employment_type": _find(r"Employment Type[:\s]+([^\n]+)", text),
         "occupation": _find(r"(?:Occupation|Designation)[:\s]+([^\n]+)", text),
         "total_ordinary_wages": _find_money(r"Total Ordinary Wages[^:]*:\s+S?\$?\s*([\d,]+\.\d{2})", text),
@@ -367,7 +434,7 @@ def _extract_joint_income_applicants(text):
     applicants = []
 
     for applicant_number in (1, 2):
-        header_pattern = rf"APPLICANT {applicant_number}.*?(?=APPLICANT {applicant_number} - MONTHLY INCOME|JOINT HOUSEHOLD INCOME SUMMARY|$)"
+        header_pattern = rf"APPLICANT {applicant_number}\b.*?(?=APPLICANT {applicant_number}\s+[—-]\s+MONTHLY INCOME|APPLICANT {applicant_number}\s*-\s*MONTHLY INCOME|JOINT HOUSEHOLD INCOME SUMMARY|$)"
         block_match = re.search(header_pattern, text, re.IGNORECASE | re.DOTALL)
         if not block_match:
             continue
@@ -386,7 +453,7 @@ def _extract_joint_income_applicants(text):
             {
                 "applicant_number": applicant_number,
                 "name": _find_multiline_value(
-                    r"Full Name[:\s]*(.+?)(?:\n(?:Application Ref|NRIC|Date of Issue|Date of Birth|Nationality|Employer)|$)",
+                    r"Full Name[:\s]*(.+?)(?=\s+(?:Application Ref|NRIC|Date of Issue|Date of Birth|Nationality|Employer)\s*[:\s]+|$)",
                     block,
                     re.IGNORECASE | re.DOTALL,
                 ),
@@ -394,7 +461,7 @@ def _extract_joint_income_applicants(text):
                 "date_of_birth": _find(r"Date of Birth[:\s]+(\d{1,2}\s+\w+\s+\d{4})", block),
                 "nationality": _find(r"Nationality[:\s]+([^\n]+)", block),
                 "employer_name": _find_multiline_value(
-                    r"Employer[:\s]*(.+?)(?:\n(?:Designation|Employment Type|Years of Service|APPLICANT \d+ - MONTHLY INCOME)|$)",
+                    r"Employer[:\s]*(.+?)(?=\s+(?:Designation|Employment Type|Years of Service|APPLICANT \d+\s+[—-]\s+MONTHLY INCOME|APPLICANT \d+\s*-\s*MONTHLY INCOME)\s*[:\s]+|$)",
                     block,
                     re.IGNORECASE | re.DOTALL,
                 ),
@@ -422,7 +489,7 @@ def extract_joint_income(text):
         "employment_type": main_applicant.get("employment_type"),
         "occupation": main_applicant.get("occupation"),
         "statement_reference": _find(r"(?:Application Ref|Ref)[:\s]+([\w-]+)", text),
-        "statement_period": _find(r"MONTHLY INCOME \(([A-Z]{3}\s+\d{4}\s*-\s*[A-Z]{3}\s+\d{4})\)", text),
+        "statement_period": _find(r"MONTHLY INCOME\s*\(([A-Z]{3}\s+\d{4}\s*(?:-|—)\s*[A-Z]{3}\s+\d{4})\)", text),
         "date_of_issue": _find(r"Date of Issue[:\s]+(\d{1,2}\s+\w+\s+\d{4})", text),
         "total_gross_income": _find_money(r"COMBINED ANNUAL GROSS INCOME[:\s]+S?\$?\s*([\d,]+\.?\d*)", text),
         "average_monthly_income": _find_money(r"COMBINED AVERAGE MONTHLY GROSS[:\s]+S?\$?\s*([\d,]+\.?\d*)", text),
@@ -449,85 +516,115 @@ def extract_income(text):
 
 # what this function does for the service: Handles  extract applicants for this service.
 def _extract_applicants(text):
-    """Parse applicant blocks from an HFE letter line by line."""
+    """Parse applicant blocks from an HFE letter."""
     applicants = []
-    lines = [line.strip() for line in text.splitlines()]
-    i = 0
 
-    while i < len(lines):
-        line = lines[i]
-        name_match = re.search(r"Applicant\s+(\d+)\s+Name[:\s]*(.*)", line, re.IGNORECASE)
-        if not name_match:
-            i += 1
+    for applicant_num in (1, 2):
+        block_match = re.search(
+            rf"Applicant\s+{applicant_num}\s+Name[:\s].*?(?=Applicant\s+{applicant_num + 1}\s+Name[:\s]|HFE\s+Reference\s+No\.?|MyDoc\s+Reference\s+No\.?|Date\s+of\s+Issue[:\s]|$)",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if not block_match:
             continue
 
-        applicant_num = int(name_match.group(1))
-        name = name_match.group(2).strip() or None
-        nric = None
-        role = None
+        block = block_match.group(0)
+        name = _find_multiline_value(
+            rf"Applicant\s+{applicant_num}\s+Name[:\s]*(.+?)(?=\s+Applicant\s+{applicant_num}\s+NRIC/UIN\s+No\.?|\s+NRIC/UIN\s+No\.?|\s+Role[:\s]|$)",
+            block,
+            re.IGNORECASE | re.DOTALL,
+        )
+        nric = _find(rf"Applicant\s+{applicant_num}\s+NRIC/UIN\s+No\.?[:\s]+([A-Z]\d{{7}}[A-Z])", block)
+        if not nric:
+            nric = _find(r"NRIC/UIN\s+No\.?[:\s]+([A-Z]\d{7}[A-Z])", block)
+        role = _find_multiline_value(
+            r"Role[:\s]*(.+?)(?=\s+Residential Status[:\s]|\s+Applicant\s+\d+\s+Name[:\s]|\s+HFE\s+Reference\s+No\.?|$)",
+            block,
+            re.IGNORECASE | re.DOTALL,
+        )
 
-        if not name:
-            name, i = _next_non_empty_line(lines, i + 1)
-            if name and re.fullmatch(r"Applicant\s+\d+", name, re.IGNORECASE):
-                name, i = _next_non_empty_line(lines, i + 1)
-
-        j = i + 1
-        while j < len(lines):
-            current = lines[j]
-            if re.search(r"Applicant\s+\d+\s+Name", current, re.IGNORECASE):
-                break
-            if re.search(r"HFE\s+Reference\s+No", current, re.IGNORECASE):
-                break
-
-            if re.search(r"NRIC/UIN\s+No\.?", current, re.IGNORECASE):
-                same_line = _find(r"NRIC/UIN\s+No\.?[:\s]+([A-Z]\d{7}[A-Z])", current)
-                if same_line:
-                    nric = same_line
-                else:
-                    nric, j = _next_non_empty_line(lines, j + 1)
-            elif not nric and re.fullmatch(r"[A-Z]\d{7}[A-Z]", current):
-                nric = current
-
-            if re.search(r"Role[:\s]*", current, re.IGNORECASE):
-                same_line = _find(r"Role[:\s]+(.+)", current)
-                if same_line:
-                    role = same_line
-                else:
-                    role, j = _next_non_empty_line(lines, j + 1)
-
-            j += 1
-
-        if name or nric or role:
-            applicants.append(
-                {
-                    "applicant_number": applicant_num,
-                    "name": name,
-                    "nric": nric,
-                    "role": role,
-                }
-            )
-
-        i = j
+        applicants.append(
+            {
+                "applicant_number": applicant_num,
+                "name": _clean_inline_value(name),
+                "nric": _clean_inline_value(nric),
+                "role": _clean_inline_value(role),
+            }
+        )
 
     return applicants
 
 
 # what this function does for the service: Handles extract hfe for this service.
 def extract_hfe(text):
+    assessment_outcome = (
+        _find_label_value(
+            r"Assessment\s+Outcome",
+            text,
+            stop_labels=["Housing Grants Eligibility", "Grant Type", "Important Notes", "Total Grants Eligible"],
+        )
+        or (
+            "NOT ELIGIBLE"
+            if re.search(r"HFE\s+letter\s+Not\s+Approved|NOT\s+approved|NOT\s+ELIGIBLE", text, re.IGNORECASE)
+            else "ELIGIBLE" if re.search(r"HFE\s+letter\s+Approved|\bELIGIBLE\b", text, re.IGNORECASE) else None
+        )
+    )
+
     return {
         "applicants": _extract_applicants(text),
         "hfe_reference_no": _find(r"HFE\s+Reference\s+No\.?\s*[:\s]+(\S+)", text),
         "mydoc_reference_no": _find(r"MyDoc\s+Reference\s+No\.?\s*[:\s]+(\S+)", text),
         "date_of_issue": _find(r"Date\s+of\s+Issue[:\s]+(\d{1,2}\s+\w+\s+\d{4})", text),
         "valid_until": _find(r"[Vv]alid\s+until\s+(\d{1,2}\s+\w+\s+\d{4})", text),
-        "eligible_flat_types": _find(r"Eligible\s+Flat\s+Type[s]?\s*\([sS]\)\s*[:\s]+([^\n]+)", text),
-        "application_scheme": _find(r"Application\s+Scheme[:\s]+([^\n]+)", text),
-        "hdb_loan_ceiling": _find_money(r"HDB\s+Loan\s+Ceiling[:\s]+S?\$?\s*([\d,]+)", text),
-        "total_household_income": _find_money(
-            r"Total\s+Household\s+(?:Monthly\s+)?Income\s*[:\s]*([\d,]+\.?\d*)",
+        "eligible_flat_types": _find_label_value(
+            r"Eligible\s+Flat\s+Type\(s\)",
             text,
+            stop_labels=["Application Scheme", "HDB Loan Ceiling", "Income Assessment", "Description"],
         ),
-        "assessment_outcome": _find(r"Assessment\s+Outcome\s*[:\s]+([^\n]+)", text),
+        "application_scheme": _find_label_value(
+            r"Application\s+Scheme",
+            text,
+            stop_labels=["HDB Loan Ceiling", "Income Assessment", "Description", "Applicant 1", "A Singapore Government Agency Website"],
+        ),
+        "hdb_loan_ceiling": _find_money_between_labels(
+            r"HDB\s+Loan\s+Ceiling",
+            text,
+            stop_labels=["Income Assessment", "Description", "Applicant 1", "Total Household Monthly Income"],
+        ),
+        "total_household_income": (
+            _find_money_between_labels(
+                r"Combined\s+Household\s+Monthly\s+Income",
+                text,
+                stop_labels=["Income Ceiling", "Income Ceiling Status", "Combined Annual Income", "Assessment Outcome"],
+            )
+            or _find_money_between_labels(
+                r"Total\s+Household\s+Monthly\s+Income",
+                text,
+                stop_labels=["Income Ceiling", "Income Ceiling Status", "Annual Income", "Assessment Outcome"],
+            )
+            or _find_money(
+                r"Total\s+Household\s+(?:Monthly\s+)?Income\s*[:\s]*([\d,]+\.?\d*)",
+                text,
+            )
+        ),
+        "assessment_outcome": _clean_inline_value(assessment_outcome),
+        "income_ceiling_status": _find_label_value(
+            r"Income\s+Ceiling\s+Status",
+            text,
+            stop_labels=["Combined Annual Income", "Annual Income", "Assessment Outcome", "Housing Grants Eligibility"],
+        ),
+        "combined_annual_income": (
+            _find_money_between_labels(
+                r"Combined\s+Annual\s+Income\s+\(NOA\s+YA\d{4}\)",
+                text,
+                stop_labels=["Assessment Outcome", "Housing Grants Eligibility", "Grant Type"],
+            )
+            or _find_money_between_labels(
+                r"Annual\s+Income\s+\(NOA\s+YA\d{4}\)",
+                text,
+                stop_labels=["Assessment Outcome", "Housing Grants Eligibility", "Grant Type"],
+            )
+        ),
         "total_grants_eligible": _find_money(
             r"Total\s+Grants?\s+Eligible[:\s]+(?:Up\s+to\s+)?S?\$?\s*([\d,]+)",
             text,

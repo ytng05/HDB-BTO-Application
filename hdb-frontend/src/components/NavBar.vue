@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { LogIn, LogOut, UserRound } from 'lucide-vue-next'
 import { useAuth } from '@/stores/auth'
@@ -10,10 +10,41 @@ const route = useRoute()
 const router = useRouter()
 const applicationStore = useApplicationStore()
 const { applicantName, isLoggedIn, logout } = useAuth()
+const isLoginConfirmOpen = ref(false)
+const isRedirectingToSingpass = ref(false)
+const pendingLoginUrl = ref('')
 
-function redirectToMockPass() {
-  const loginUrl = getSingpassAuthLoginUrl(route.fullPath || '/')
-  window.location.assign(loginUrl)
+function openLoginConfirm() {
+  if (isRedirectingToSingpass.value) {
+    return
+  }
+
+  pendingLoginUrl.value = getSingpassAuthLoginUrl(route.fullPath || '/')
+  isLoginConfirmOpen.value = true
+}
+
+function cancelLoginConfirm() {
+  if (isRedirectingToSingpass.value) {
+    return
+  }
+
+  isLoginConfirmOpen.value = false
+}
+
+function confirmRedirectToMockPass() {
+  if (isRedirectingToSingpass.value) {
+    return
+  }
+
+  if (!pendingLoginUrl.value) {
+    pendingLoginUrl.value = getSingpassAuthLoginUrl(route.fullPath || '/')
+  }
+
+  isRedirectingToSingpass.value = true
+  // Show a short transition state before handing over to Singpass.
+  window.setTimeout(() => {
+    window.location.assign(pendingLoginUrl.value)
+  }, 150)
 }
 
 const navLinks = computed(() => {
@@ -77,13 +108,28 @@ async function handleLogout() {
             <LogOut :size="17" />
           </button>
         </template>
-        <button v-else class="nav-login" type="button" @click="redirectToMockPass">
+        <button v-else class="nav-login" type="button" :disabled="isRedirectingToSingpass" @click="openLoginConfirm">
           <LogIn :size="17" />
-          <span>Login</span>
+          <span>{{ isRedirectingToSingpass ? 'Connecting...' : 'Login' }}</span>
         </button>
       </div>
     </div>
   </header>
+
+  <div v-if="isLoginConfirmOpen" class="auth-redirect-overlay" role="dialog" aria-modal="true" aria-live="polite">
+    <div class="auth-redirect-card">
+      <p class="auth-redirect-title">Continue to Singpass?</p>
+      <p class="auth-redirect-copy">You are about to leave this page and sign in through MockPass.</p>
+      <div class="auth-redirect-actions">
+        <button class="auth-btn auth-btn--secondary" type="button" :disabled="isRedirectingToSingpass" @click="cancelLoginConfirm">
+          Cancel
+        </button>
+        <button class="auth-btn auth-btn--primary" type="button" :disabled="isRedirectingToSingpass" @click="confirmRedirectToMockPass">
+          {{ isRedirectingToSingpass ? 'Redirecting...' : 'Continue to Singpass' }}
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -227,6 +273,11 @@ async function handleLogout() {
   transition: background 0.15s ease, color 0.15s ease;
 }
 
+.nav-login:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .nav-login:hover {
   background: var(--color-red);
   color: var(--color-white);
@@ -248,6 +299,71 @@ async function handleLogout() {
 
 .nav-logout:hover {
   color: var(--color-red);
+}
+
+.auth-redirect-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(29, 29, 31, 0.35);
+}
+
+.auth-redirect-card {
+  width: min(420px, 100%);
+  border-radius: 14px;
+  border: 1px solid rgba(29, 29, 31, 0.12);
+  background: #fff;
+  padding: 20px;
+  text-align: center;
+  box-shadow: 0 16px 30px rgba(29, 29, 31, 0.18);
+}
+
+.auth-redirect-title {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: var(--color-charcoal);
+}
+
+.auth-redirect-copy {
+  margin: 8px 0 0;
+  color: rgba(29, 29, 31, 0.72);
+  font-size: 0.94rem;
+}
+
+.auth-redirect-actions {
+  margin-top: 16px;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.auth-btn {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-btn--secondary {
+  border: 1px solid var(--color-border);
+  background: #fff;
+  color: var(--color-charcoal);
+}
+
+.auth-btn--primary {
+  border: 1px solid var(--color-red);
+  background: var(--color-red);
+  color: #fff;
+}
+
+.auth-btn:disabled {
+  opacity: 0.65;
+  cursor: wait;
 }
 
 @media (max-width: 640px) {
