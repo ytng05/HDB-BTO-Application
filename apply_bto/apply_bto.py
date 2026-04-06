@@ -82,37 +82,32 @@ def load_default_application_fee():
 
 DEFAULT_APPLICATION_FEE = load_default_application_fee()
 
-NOTIFICATION_URL      = os.environ.get('NOTIFICATION_URL',      'http://localhost:5013')
-RABBITMQ_HOST    = os.environ.get('RABBITMQ_HOST',    'localhost')
-RABBITMQ_PORT    = int(os.environ.get('RABBITMQ_PORT', 5672))
-EXCHANGE_NAME    = 'bto_notifications'
+NOTIFICATION_SERVICE_URL = os.environ.get("NOTIFICATION_SERVICE_URL", "http://localhost:5000")
+NOTIFICATION_QUEUE_NAME = os.environ.get("NOTIFICATION_QUEUE_NAME", "hdb_notification_queue")
 
 def publish_event(routing_key: str, payload: dict):
-    """Publish a notification event; falls back to HTTP if RabbitMQ unavailable."""
+    """Publish a notification event to the notification API."""
     try:
-        import pika
-        connection = pika.BlockingConnection(
-            pika.ConnectionParameters(host=RABBITMQ_HOST, port=RABBITMQ_PORT)
+        response = requests.post(
+            f"{NOTIFICATION_SERVICE_URL}/publish",
+            json={
+                "exchange": "bto",
+                "exchange_type": "topic",
+                "routing_key": routing_key,
+                "queue_name": NOTIFICATION_QUEUE_NAME,
+                "payload": payload,
+            },
+            timeout=5,
         )
-        channel = connection.channel()
-        channel.exchange_declare(exchange=EXCHANGE_NAME, exchange_type='topic', durable=True)
-        channel.basic_publish(
-            exchange=EXCHANGE_NAME,
-            routing_key=routing_key,
-            body=json.dumps(payload),
+        response.raise_for_status()
+        log_event("Published notification event", routing_key=routing_key)
+        return True
+    except requests.RequestException as exc:
+        logger.warning(
+            "Notification publish failed | %s",
+            json.dumps({"routing_key": routing_key, "error": str(exc)}, sort_keys=True),
         )
-        connection.close()
-        print(f'[AMQP] Published: {routing_key}')
-    except Exception as e:
-        print(f'[AMQP] Failed ({e}); falling back to HTTP notification.')
-        try:
-            requests.post(
-                f'{NOTIFICATION_URL}/notify',
-                json={**payload, 'event_type': routing_key},
-                timeout=5
-            )
-        except Exception as http_e:
-            print(f'[HTTP NOTIFY] Also failed: {http_e}')
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +148,64 @@ def parse_int(value):
     if isinstance(value, int):
         return value
     return None
+
+
+def get_main_applicant_contact(application):
+    members = application.get("members") if isinstance(application, dict) else None
+    if not isinstance(members, list):
+        return None, None
+
+    main_member = next(
+        (
+            member
+            for member in members
+            if isinstance(member, dict) and str(member.get("member_role", "")).upper() == "MAIN_APPLICANT"
+        ),
+        None,
+    )
+    if not isinstance(main_member, dict):
+        return None, None
+
+    mobile = main_member.get("contact_number")
+    email = main_member.get("email")
+
+    normalized_mobile = mobile.strip() if isinstance(mobile, str) and mobile.strip() else None
+    normalized_email = email.strip() if isinstance(email, str) and email.strip() else None
+    return normalized_mobile, normalized_email
+
+
+def notify_apply_outcome(workflow):
+    application = workflow.get("application") or {}
+    eligibility_result = workflow.get("eligibility_result") or {}
+    is_eligible = bool(eligibility_result.get("eligible"))
+
+    routing_key = "application.notify"
+    event_type = "BTOEligibilityPassed" if is_eligible else "BTOEligibilityFailed"
+    subject = "BTO Eligibility Result: Eligible" if is_eligible else "BTO Eligibility Result: Not Eligible"
+
+    mobile, email = get_main_applicant_contact(application)
+    applicant_nric = application.get("main_applicant_nric")
+    application_id = workflow.get("application_id")
+
+    summary = eligibility_result.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        summary = (
+            "Your BTO application is eligible."
+            if is_eligible
+            else "Your BTO application is not eligible."
+        )
+
+    payload = {
+        "eventType": event_type,
+        "subject": subject,
+        "applicationId": application_id,
+        "applicantId": applicant_nric,
+        "email": email,
+        "mobile": mobile,
+        "message": summary,
+    }
+
+    return publish_event(routing_key, payload)
 
 
 
@@ -381,27 +434,77 @@ def get_cached_workflow_result(workflow):
     return result, status_code
 
 
+def normalise_ineligibility_reasons(raw_reasons):
+    if not isinstance(raw_reasons, list):
+        return []
+
+    cleaned_reasons = []
+    seen = set()
+
+    for reason in raw_reasons:
+        if not isinstance(reason, str):
+            continue
+
+        cleaned = " ".join(reason.split())
+        if not cleaned:
+            continue
+
+        first_alpha_index = next((index for index, ch in enumerate(cleaned) if ch.isalpha()), -1)
+        if first_alpha_index >= 0:
+            cleaned = (
+                cleaned[:first_alpha_index]
+                + cleaned[first_alpha_index].upper()
+                + cleaned[first_alpha_index + 1 :]
+            )
+
+        if cleaned[-1] not in ".!?":
+            cleaned = f"{cleaned}."
+
+        dedupe_key = cleaned.lower()
+        if dedupe_key in seen:
+            continue
+
+        seen.add(dedupe_key)
+        cleaned_reasons.append(cleaned)
+
+    return cleaned_reasons
+
+
 #  Handles build completion result for this service.
 def build_completion_result(workflow):
     eligibility_result = workflow.get("eligibility_result") or {}
     updated_application = workflow.get("updated_application") or {}
 
-    ineligibility_reasons = eligibility_result.get("ineligibility_reasons")
-    if not isinstance(ineligibility_reasons, list):
-        ineligibility_reasons = []
+    ineligibility_reasons = normalise_ineligibility_reasons(
+        eligibility_result.get("ineligibility_reasons")
+    )
+    formatted_ineligibility_reasons = (
+        "\n".join(
+            f"{index + 1}. {reason}" for index, reason in enumerate(ineligibility_reasons)
+        )
+        if ineligibility_reasons
+        else None
+    )
 
     eligible = bool(eligibility_result.get("eligible"))
     summary = (
-        eligibility_result.get("summary")
+        eligibility_result.get("summary").strip()
         if isinstance(eligibility_result.get("summary"), str)
         else None
     )
+    if summary == "":
+        summary = None
 
     default_message = (
         "Your payment succeeded and the application passed the eligibility checks."
         if eligible
         else "Your payment succeeded, but the application did not pass the eligibility checks."
     )
+    if not eligible and not summary and formatted_ineligibility_reasons:
+        summary = (
+            "Your payment succeeded, but the application did not pass the eligibility checks. "
+            f"Reasons:\n{formatted_ineligibility_reasons}"
+        )
 
     return {
         "merchant_txn_ref": workflow["merchant_txn_ref"],
@@ -411,6 +514,7 @@ def build_completion_result(workflow):
         "eligible": eligible,
         "summary": summary,
         "ineligibility_reasons": ineligibility_reasons,
+        "formatted_ineligibility_reasons": formatted_ineligibility_reasons,
         "message": summary or default_message,
     }
 
@@ -627,6 +731,10 @@ def finalise_workflow(workflow):
             application_status=updated_application.get("application_status"),
         )
 
+    if not workflow.get("notification_sent"):
+        workflow["notification_sent"] = notify_apply_outcome(workflow)
+        workflow["updated_at"] = now_iso()
+
     result = build_completion_result(workflow)
     return cache_workflow_result(workflow, result, 200)
 
@@ -751,6 +859,7 @@ def initiate_apply_bto():
         "updated_application": None,
         "result": None,
         "result_status_code": None,
+        "notification_sent": False,
         "last_error": None,
         "created_at": timestamp,
         "updated_at": timestamp,

@@ -219,7 +219,11 @@ services:
       NETS_PAYMENT_SERVICE_URL: http://nets-payment-service:5003
       APPLICATION_SERVICE_URL: http://application-service:5004
       CHECK_ELIGIBILITY_SERVICE_URL: http://check-eligibility-service:5008
+      NOTIFICATION_SERVICE_URL: http://notification-api:5000
+      NOTIFICATION_QUEUE_NAME: hdb_notification_queue_irvin
       APPLICATION_FEE: 10
+    depends_on:
+      - notification-api
     restart: always
 
   nets-payment-service:
@@ -244,26 +248,28 @@ services:
     restart: always
 
   # Notification Service — RabbitMQ wrapper API
-  # notification-api:
-  #   build:
-  #     context: ./cloudamqp
-  #     dockerfile: Dockerfile
-  #   container_name: notification_api
-  #   ports:
-  #     - "5015:5000"
-  #   env_file:
-  #     - ./cloudamqp/.env
-  #   restart: always
+  notification-api:
+    build:
+      context: ./notification
+      dockerfile: Dockerfile
+    container_name: notification_api
+    ports:
+      - "5015:5000"
+    env_file:
+      - ./notification/.env
+    restart: always
 
   # Notification Service — RabbitMQ consumer + Twilio SMS
-  # notification-consumer:
-  #   build:
-  #     context: ./cloudamqp
-  #     dockerfile: Dockerfile.consumer
-  #   container_name: notification_consumer
-  #   env_file:
-  #     - ./cloudamqp/.env
-  #   restart: always
+  notification-consumer:
+    build:
+      context: ./notification
+      dockerfile: Dockerfile.consumer
+    container_name: notification_consumer
+    env_file:
+      - ./notification/.env
+    environment:
+      NOTIFICATION_QUEUE_NAME: hdb_notification_queue_irvin
+    restart: always
 
   ballot-audit-db:
     image: mysql:8.0
@@ -371,18 +377,6 @@ services:
       - ballot-service
       - flat-selection-service
     restart: always
-
-  outsystems-project-seeder:
-    image: python:3.12-slim
-    container_name: outsystems_project_seeder
-    command: ["python", "/seed/seed_outsystems_projects.py"]
-    environment:
-      OUTSYSTEMS_PROJECT_API_URL: ${OUTSYSTEMS_PROJECT_API_URL:-https://personal-iu6aefgj.outsystemscloud.com/ProjectsMicroservice/rest/ProjectsAPI}
-      OUTSYSTEMS_SEED_TIMEOUT_SECONDS: ${OUTSYSTEMS_SEED_TIMEOUT_SECONDS:-20}
-      OUTSYSTEMS_SEED_STRICT: ${OUTSYSTEMS_SEED_STRICT:-false}
-    volumes:
-      - ./scripts/seed_outsystems_projects.py:/seed/seed_outsystems_projects.py:ro
-    restart: "no"
 
 volumes:
   kong_pgdata:

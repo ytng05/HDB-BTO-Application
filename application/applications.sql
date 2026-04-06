@@ -189,14 +189,14 @@ INSERT INTO application_member (
 -- ),
 
 -- App 2011..2019 demo members backed by mockpass/v3.json personas
-(3011, 2011, 'MAIN_APPLICANT', 'S9912370B', 'ELIZABERTH PIERCE JOHNSON', 'Self', '1999-10-06', 'Citizen', 'Widowed', '+65 92345678', 'jenny.lim@example.com', 4500.00, '2026-03-22 09:05:00', '2026-03-22 09:20:00'),
-(3012, 2012, 'MAIN_APPLICANT', 'S9812353I', 'SONG CHIN YONG', 'Self', '1988-10-06', 'Citizen', 'Single', '+65 97399245', 'myinfotesting@gmail.com', 0.00, '2026-03-22 09:10:00', '2026-03-22 09:30:00'),
-(3015, 2014, 'MAIN_APPLICANT', 'S9912365F', 'CHENG MEI QIN', 'Self', '1961-06-17', 'Citizen', 'Single', '+65 94891038', 'testmail-mc@gmail.com', 10103.42, '2026-03-22 09:20:00', '2026-03-22 09:50:00'),
-(3016, 2015, 'MAIN_APPLICANT', 'S9812388Z', 'PATRICIA TAN XIAO HUI', 'Self', '1988-06-06', 'Citizen', '', '+65 81634116', NULL, 4500.00, '2026-03-22 09:25:00', '2026-03-22 10:00:00'),
-(3017, 2016, 'MAIN_APPLICANT', 'S9812388A', 'TAN MING HENG TERENCE', 'Self', '1992-02-01', 'Citizen', 'Single', '+65 167834291', NULL, 11117.58, '2026-03-22 09:30:00', '2026-03-22 10:10:00'),
-(3018, 2017, 'MAIN_APPLICANT', 'S9812346F', 'SAM YEE', 'Self', '1989-12-06', 'Citizen', 'Married', '+65 97399245', 'myinfotesting@gmail.com', 0.00, '2026-03-22 09:35:00', '2026-03-22 10:20:00'),
-(3019, 2018, 'MAIN_APPLICANT', 'S9812385G', 'DEWANARA VANASAMIN', 'Self', '1950-10-06', 'Citizen', 'Single', '+65 97399245', 'myinfotesting@gmail.com', 0.00, '2026-03-22 09:40:00', '2026-03-22 10:30:00'),
-(3020, 2019, 'MAIN_APPLICANT', 'S6005055D', 'MY.INFO:CC', 'Self', '1948-02-01', 'Citizen', 'Single', '+65 97399245', 'myinfotesting@gmail.com', 7035.92, '2026-03-22 09:45:00', '2026-03-22 10:40:00');
+(3011, 2011, 'MAIN_APPLICANT', 'S9912370B', 'ELIZABERTH PIERCE JOHNSON', 'Self', '1999-10-06', 'Citizen', 'Widowed', '+ 65 00000000', 'demo@gmail.com', 4500.00, '2026-03-22 09:05:00', '2026-03-22 09:20:00'),
+(3012, 2012, 'MAIN_APPLICANT', 'S9812353I', 'SONG CHIN YONG', 'Self', '1988-10-06', 'Citizen', 'Single', '+65 00000000', 'demo@gmail.com', 0.00, '2026-03-22 09:10:00', '2026-03-22 09:30:00'),
+(3015, 2014, 'MAIN_APPLICANT', 'S9912365F', 'CHENG MEI QIN', 'Self', '1961-06-17', 'Citizen', 'Single', '+65 00000000', 'demo@gmail.com', 10103.42, '2026-03-22 09:20:00', '2026-03-22 09:50:00'),
+(3016, 2015, 'MAIN_APPLICANT', 'S9812388Z', 'PATRICIA TAN XIAO HUI', 'Self', '1988-06-06', 'Citizen', '', '+65 00000000', 'demo@gmail.com', 4500.00, '2026-03-22 09:25:00', '2026-03-22 10:00:00'),
+(3017, 2016, 'MAIN_APPLICANT', 'S9812388A', 'TAN MING HENG TERENCE', 'Self', '1992-02-01', 'Citizen', 'Single', '+65 00000000', 'demo@gmail.com', 11117.58, '2026-03-22 09:30:00', '2026-03-22 10:10:00'),
+(3018, 2017, 'MAIN_APPLICANT', 'S9812346F', 'SAM YEE', 'Self', '1989-12-06', 'Citizen', 'Married', '+65 00000000', 'demo@gmail.com', 0.00, '2026-03-22 09:35:00', '2026-03-22 10:20:00'),
+(3019, 2018, 'MAIN_APPLICANT', 'S9812385G', 'DEWANARA VANASAMIN', 'Self', '1950-10-06', 'Citizen', 'Single', '+65 00000000', 'demo@gmail.com', 0.00, '2026-03-22 09:40:00', '2026-03-22 10:30:00'),
+(3020, 2019, 'MAIN_APPLICANT', 'S6005055D', 'MY.INFO:CC', 'Self', '1948-02-01', 'Citizen', 'Single', '+65 00000000', 'demo@gmail.com', 7035.92, '2026-03-22 09:45:00', '2026-03-22 10:40:00');
 
 -- DEMO BULK BALLOT DATA REMOVED
 -- The old S770... synthetic applicants made the ballot hard to reconcile with

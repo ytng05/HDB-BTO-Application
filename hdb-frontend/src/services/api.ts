@@ -211,6 +211,7 @@ export interface ApplyBtoCompletionResult {
   eligible?: boolean
   summary?: string
   ineligibility_reasons?: string[]
+  formatted_ineligibility_reasons?: string
   message?: string
 }
 
