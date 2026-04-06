@@ -14,6 +14,8 @@ const applicationStore = useApplicationStore()
 const APPLICATION_FEE = 10
 const NETS_PAYMENT_REF_KEY = 'nets_last_merchant_txn_ref'
 const NETS_ACTIVE_PAYMENT_REF_KEY = 'nets_active_merchant_txn_ref'
+const NETS_PAYMENT_FLOW_KEY = 'nets_payment_flow'
+const NETS_FLOW_APPLY_BTO = 'apply-bto'
 const householdMemberCount = computed(() => applicationStore.householdMemberCount)
 
 const paymentStep = ref<'idle' | 'initiating' | 'redirecting' | 'error'>('idle')
@@ -26,6 +28,7 @@ function storePendingPaymentRef(merchantTxnRef: string) {
 
   window.sessionStorage.setItem(NETS_PAYMENT_REF_KEY, merchantTxnRef)
   window.sessionStorage.setItem(NETS_ACTIVE_PAYMENT_REF_KEY, merchantTxnRef)
+  window.sessionStorage.setItem(NETS_PAYMENT_FLOW_KEY, NETS_FLOW_APPLY_BTO)
 }
 
 function clearActivePaymentRef() {

@@ -70,6 +70,7 @@ create_service "nets-payment" "http://nets-payment-service:5003"
 create_route   "nets-payment" "nets-payment-b2s-callback-route" "/payment/b2s-callback"                     '["GET","POST","OPTIONS"]'
 create_route   "nets-payment" "nets-payment-s2s-callback-route" "/payment/s2s-callback"                     '["POST","OPTIONS"]'
 create_route   "nets-payment" "nets-payment-abandon-route"      "~/payment/abandon/[^/]+$"                  '["POST","OPTIONS"]'
+create_route   "nets-payment" "nets-payment-status-route"       "~/payment/status/[^/]+$"                   '["GET","OPTIONS"]'
 
 create_service "document"     "http://document-service:5050"
 create_route   "document"     "document-extract-route"          "/extract"                                  '["POST","OPTIONS"]'
@@ -101,6 +102,11 @@ create_route   "flat-selection" "flat-selection-list-route"        "/flat-select
 
 create_service "application"    "http://application-service:5004"
 create_route   "application"    "application-list-route"           "/applications"                            '["GET","OPTIONS"]'
+
+create_service "flat-allocation" "http://flat-allocation-service:5005"
+create_route   "flat-allocation" "flat-allocation-select-route"    "/select-flat"                            '["POST","OPTIONS"]'
+create_route   "flat-allocation" "flat-allocation-initiate-route"  "/select-flat/initiate"                   '["POST","OPTIONS"]'
+create_route   "flat-allocation" "flat-allocation-complete-route"  "~/select-flat/complete/[^/]+$"          '["POST","OPTIONS"]'
 
 # ─── Plugins ─────────────────────────────────────────────────────────────────
 echo ""

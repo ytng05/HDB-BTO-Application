@@ -11,6 +11,7 @@ export const APPLICATION_URL = import.meta.env.VITE_APPLICATION_URL ?? API_GATEW
 export const FLAT_URL = import.meta.env.VITE_FLAT_URL ?? API_GATEWAY_URL
 export const NETS_PAYMENT_URL = import.meta.env.VITE_NETS_PAYMENT_URL ?? API_GATEWAY_URL
 export const DOCUMENT_URL = import.meta.env.VITE_DOCUMENT_URL ?? API_GATEWAY_URL
+export const FLAT_ALLOCATION_URL = import.meta.env.VITE_FLAT_ALLOCATION_URL ?? API_GATEWAY_URL
 const PROCESS_BALLOT_API_KEY = import.meta.env.VITE_PROCESS_BALLOT_API_KEY ?? 'ballot-cron-job-secret'
 
 type ApiMessage = string | string[]
@@ -115,10 +116,52 @@ export interface FlatSelectionRecord {
   project_id: number
   queue_number: number
   flat_id: number | null
-  status: 'balloted' | 'selecting' | 'reserved' | 'paid' | 'forfeited' | 'not_called' | 'no_flat_selected'
+  status: 'balloted' | 'selecting' | 'reserved' | 'paid' | 'selected' | 'forfeited' | 'not_called' | 'no_flat_selected'
   reserved_at: string | null
   created_at: string | null
   updated_at: string | null
+}
+
+export interface FlatAllocationSelectRequest {
+  applicant_id: string
+  selection_id: number
+  flat_id: number
+  payment_amount: number
+}
+
+export interface FlatAllocationSelectResponse {
+  merchant_txn_ref: string
+  stage?: string
+  gateway_url?: string
+  payload?: string
+  hmac?: string
+  api_key_id?: string
+  payment?: {
+    gateway_url?: string
+    payload?: string
+    hmac?: string
+    api_key_id?: string
+  }
+  message?: string
+}
+
+export interface FlatAllocationCompleteResponse {
+  merchant_txn_ref: string
+  stage?: string
+  payment_status?: 'success' | 'failed' | 'cancelled' | 'pending' | 'unknown'
+  transaction_id?: string | null
+  applicant_id?: string | number
+  selection_id?: number
+  flat_id?: number
+  payment_amount?: number
+  message?: string
+}
+
+export interface NetsPaymentStatusResult {
+  merchant_txn_ref: string
+  status: 'success' | 'failed' | 'cancelled' | 'pending' | 'unknown'
+  transaction_id?: string | null
+  message?: string
 }
 
 export interface FlatServiceRecord {
@@ -272,6 +315,11 @@ const flatApi = axios.create({
 const documentApi = axios.create({
   baseURL: DOCUMENT_URL,
   timeout: 60000,
+})
+
+const flatAllocationApi = axios.create({
+  baseURL: FLAT_ALLOCATION_URL,
+  timeout: 30000,
 })
 
 const netsPaymentApi = axios.create({
@@ -504,6 +552,74 @@ export async function fetchFlatSelections(
   }
 }
 
+export async function selectFlatAllocation(
+  payload: FlatAllocationSelectRequest,
+): Promise<{ status: number; data: ApiEnvelope<FlatAllocationSelectResponse> }> {
+  const response = await flatAllocationApi.post<ApiEnvelope<FlatAllocationSelectResponse> | FlatAllocationSelectResponse>(
+    '/select-flat',
+    payload,
+    {
+      validateStatus: () => true,
+    },
+  )
+
+  const responseData = response.data as ApiEnvelope<FlatAllocationSelectResponse>
+  const directPayload = response.data as FlatAllocationSelectResponse
+  const isEnvelope = typeof responseData?.code === 'number'
+
+  return {
+    status: response.status,
+    data: isEnvelope
+      ? responseData
+      : {
+          code: response.status,
+          data: directPayload,
+        },
+  }
+}
+
+export async function completeFlatAllocation(
+  merchantTxnRef: string,
+): Promise<{ status: number; data: ApiEnvelope<FlatAllocationCompleteResponse> }> {
+  const response = await flatAllocationApi.post<ApiEnvelope<FlatAllocationCompleteResponse> | FlatAllocationCompleteResponse>(
+    `/select-flat/complete/${encodeURIComponent(merchantTxnRef)}`,
+    undefined,
+    {
+      validateStatus: () => true,
+    },
+  )
+
+  const responseData = response.data as ApiEnvelope<FlatAllocationCompleteResponse>
+  const directPayload = response.data as FlatAllocationCompleteResponse
+  const isEnvelope = typeof responseData?.code === 'number'
+
+  return {
+    status: response.status,
+    data: isEnvelope
+      ? responseData
+      : {
+          code: response.status,
+          data: directPayload,
+        },
+  }
+}
+
+export async function fetchNetsPaymentStatus(
+  merchantTxnRef: string,
+): Promise<{ status: number; data: ApiEnvelope<NetsPaymentStatusResult> }> {
+  const response = await netsPaymentApi.get<ApiEnvelope<NetsPaymentStatusResult>>(
+    `/payment/status/${encodeURIComponent(merchantTxnRef)}`,
+    {
+      validateStatus: () => true,
+    },
+  )
+
+  return {
+    status: response.status,
+    data: response.data,
+  }
+}
+
 export async function fetchApplications(
   params?: {
     nric?: string
@@ -533,6 +649,22 @@ export async function fetchAvailableFlats(
     validateStatus: () => true,
     params,
   })
+
+  return {
+    status: response.status,
+    data: response.data,
+  }
+}
+
+export async function fetchFlatById(
+  flatId: number,
+): Promise<{ status: number; data: ApiEnvelope<FlatServiceRecord> }> {
+  const response = await flatApi.get<ApiEnvelope<FlatServiceRecord>>(
+    `/flats/${encodeURIComponent(String(flatId))}`,
+    {
+      validateStatus: () => true,
+    },
+  )
 
   return {
     status: response.status,
