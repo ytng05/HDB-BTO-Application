@@ -5,6 +5,8 @@ import os
 
 import pika
 from dotenv import load_dotenv
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 from twilio.rest import Client
 
 load_dotenv()
@@ -30,7 +32,22 @@ def get_rabbitmq_connection() -> pika.BlockingConnection:
 
 
 def send_email(to_email: str, subject: str, body: str) -> None:
-    print(f"[EMAIL] To: {to_email} | Subject: {subject} | Body: {body}")
+    api_key = os.getenv("SENDGRID_API_KEY")
+    from_email = os.getenv("SENDGRID_FROM_EMAIL")
+
+    if not api_key or not from_email:
+        raise ValueError("Missing SendGrid environment variables.")
+
+    message = Mail(
+        from_email=from_email,
+        to_emails=to_email,
+        subject=subject,
+        plain_text_content=body
+    )
+
+    sg = SendGridAPIClient(api_key)
+    response = sg.send(message)
+    print(f"[EMAIL ✓] Sent to {to_email} | Status: {response.status_code}")
 
 
 def send_sms(to_mobile: str, message: str) -> None:
