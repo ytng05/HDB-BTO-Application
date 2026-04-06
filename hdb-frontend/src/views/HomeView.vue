@@ -5,7 +5,7 @@ import { Building2, FileText, MapPinned, UserRound } from 'lucide-vue-next'
 import HeroCarousel from '@/components/HeroCarousel.vue'
 import BtoProjectCard from '@/components/BtoProjectCard.vue'
 import ApplicationStatusStepper from '@/components/ApplicationStatusStepper.vue'
-import { getProjectName, getProjectTown, heroSlides, upcomingProjects, type UpcomingProject } from '@/data/projects'
+import { getProjectName, getProjectTown, heroSlides, syncProjectLookup, upcomingProjects, type UpcomingProject } from '@/data/projects'
 import { useApplicationStore } from '@/stores/application'
 import { useAuth } from '@/stores/auth'
 import {
@@ -18,6 +18,7 @@ import {
   type ProjectRecord,
 } from '@/services/api'
 import type { ApplicationStatus } from '@/stores/application'
+import { formatApiDate } from '@/utils/datetime'
 
 const router = useRouter()
 const applicationStore = useApplicationStore()
@@ -42,6 +43,8 @@ const latestProjectName = computed(() =>
 const launchProjects = ref<UpcomingProject[]>([])
 const launchesError = ref('')
 const flatSelectionByApplicationId = ref<Record<number, FlatSelectionRecord>>({})
+const isLoadingLinkedApplications = ref(false)
+const hasFetchedLinkedApplications = ref(false)
 const showLocalWorkflow = computed(
   () => !applicationStore.hasExistingApplications && applicationStore.status !== 'editing',
 )
@@ -75,6 +78,10 @@ function hasQueueAndNoFlat(selection: FlatSelectionRecord | null) {
   return selection.flat_id === null && selection.queue_number > 0 && queueReadyStatuses.includes(selection.status)
 }
 const primaryActionLabel = computed(() => {
+  if (isLoggedIn.value && !hasFetchedLinkedApplications.value) {
+    return 'Loading Applications...'
+  }
+
   if (applicationStore.hasBallotAccess) {
     return 'Choose Flat'
   }
@@ -256,19 +263,26 @@ async function refreshFlatSelections() {
 }
 
 async function refreshLinkedApplications() {
+  isLoadingLinkedApplications.value = true
   const nric = currentNric.value?.trim().toUpperCase()
   if (!nric) {
     applicationStore.clearLinkedApplications()
+    isLoadingLinkedApplications.value = false
     return
   }
 
-  const { status, data } = await fetchApplications({ main_applicant_nric: nric })
-  if (status === 200 && Array.isArray(data.applications)) {
-    applicationStore.replaceLinkedApplicationsForNric(nric, data.applications)
-    return
-  }
+  try {
+    const { status, data } = await fetchApplications({ main_applicant_nric: nric })
+    if (status === 200 && Array.isArray(data.applications)) {
+      applicationStore.replaceLinkedApplicationsForNric(nric, data.applications)
+      return
+    }
 
-  applicationStore.replaceLinkedApplicationsForNric(nric, [])
+    applicationStore.replaceLinkedApplicationsForNric(nric, [])
+  } finally {
+    hasFetchedLinkedApplications.value = true
+    isLoadingLinkedApplications.value = false
+  }
 }
 
 function syncWorkflowFromBallotResults() {
@@ -333,20 +347,7 @@ function getQueueBadge(application: ApplicationRecord) {
 }
 
 function formatDate(value: string | null) {
-  if (!value) {
-    return 'Not available'
-  }
-
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) {
-    return value
-  }
-
-  return new Intl.DateTimeFormat('en-SG', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }).format(parsed)
+  return formatApiDate(value, 'Not available')
 }
 
 function getLinkedRoles(application: ApplicationRecord) {
@@ -380,6 +381,10 @@ function formatMemberRole(member: ApplicationMemberRecord) {
 }
 
 function startApplicationFlow() {
+  if (isLoggedIn.value && !hasFetchedLinkedApplications.value) {
+    return
+  }
+
   if (applicationStore.hasBallotAccess) {
     void router.push('/select-flat')
     return
@@ -423,6 +428,7 @@ function toCard(project: ProjectRecord) {
 onMounted(async () => {
   launchesError.value = ''
   launchProjects.value = []
+  hasFetchedLinkedApplications.value = false
 
   try {
     const currentResponse = await fetchProjects({ status: 'open' })
@@ -432,6 +438,7 @@ onMounted(async () => {
       && Array.isArray(currentResponse.data.data)
       && currentResponse.data.data.length > 0
     ) {
+      syncProjectLookup(currentResponse.data.data)
       launchProjects.value = currentResponse.data.data.map(toCard)
     } else {
       launchProjects.value = []
@@ -506,7 +513,12 @@ watch(activeApplication, () => {
               <p class="dashboard-summary__title">{{ dashboardTitle }}</p>
               <p class="dashboard-summary__text">{{ dashboardText }}</p>
             </div>
-            <button class="btn btn-primary dashboard-summary__button" type="button" @click="startApplicationFlow">
+            <button
+              class="btn btn-primary dashboard-summary__button"
+              type="button"
+              :disabled="isLoadingLinkedApplications || (isLoggedIn && !hasFetchedLinkedApplications)"
+              @click="startApplicationFlow"
+            >
               {{ primaryActionLabel }}
             </button>
           </div>

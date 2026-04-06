@@ -48,17 +48,17 @@ INSERT INTO flat_selection (
 ) VALUES
 -- Historical/demo rows for prior runs.
 -- Queue numbers are now coherent within each project (starting from 1).
-(1801, 'S9701234K', 'S8805678E', 51, 1, 'selecting'),
-(1802, 'S8501234A', NULL,        21, 1, 'not_called'),
-(1803, 'S9206789F', NULL,        21, 2, 'forfeited'),
-(1804, 'S9812346F', NULL,        31, 1, 'not_called'),
-(1805, 'S9812346F', NULL,        41, 1, 'not_called'),
-(1806, 'S6005055D', NULL,         1, 1, 'not_called'),
-(1807, 'S9201234W', NULL,         1, 2, 'balloted'),
-(1808, 'S9401234L', NULL,        52, 1, 'not_called'),
-(1809, 'S9501234R', NULL,        52, 2, 'balloted'),
-(1810, 'S9601234S', NULL,        51, 2, 'balloted'),
-(1811, 'S8901234D', NULL,        52, 3, 'balloted');
+(1801, 'S9701234K', 'S8805678E', 40, 1, 'selecting'),
+(1802, 'S8501234A', NULL,        40, 2, 'not_called'),
+(1803, 'S9206789F', NULL,        40, 3, 'forfeited'),
+(1804, 'S9812346F', NULL,        41, 1, 'not_called'),
+(1805, 'S9812346F', NULL,        41, 2, 'not_called'),
+(1806, 'S6005055D', NULL,        42, 1, 'not_called'),
+(1807, 'S9201234W', NULL,        42, 2, 'balloted'),
+(1808, 'S9401234L', NULL,        42, 3, 'not_called'),
+(1809, 'S9501234R', NULL,        43, 1, 'balloted'),
+(1810, 'S9601234S', NULL,        43, 2, 'balloted'),
+(1811, 'S8901234D', NULL,        43, 3, 'balloted');
 
 INSERT INTO flat_selection_forfeit_penalty (
     selection_id,

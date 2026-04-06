@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { CirclePlus, FileText, FolderInput, HousePlus, LockKeyhole, Users } from 'lucide-vue-next'
 import SelectionModal from '@/components/SelectionModal.vue'
@@ -123,6 +123,10 @@ function startFreshApplication() {
   showResetModal.value = false
   showSubmissionSummary.value = false
 }
+
+onMounted(() => {
+  void applicationStore.ensureProjectCatalogLoaded()
+})
 </script>
 
 <template>

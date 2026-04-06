@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApplicationStore } from '@/stores/application'
+import { formatApiDateTime } from '@/utils/datetime'
 
 const router = useRouter()
 const applicationStore = useApplicationStore()
@@ -18,6 +19,10 @@ const documentSummary = computed(() => ({
   income: applicationStore.documents.incomePdfName || 'Not available',
   hfe: applicationStore.documents.hfeLetterPdfName || 'Not available',
 }))
+
+const submittedAtDisplay = computed(() => {
+  return formatApiDateTime(applicationStore.lastSubmittedAt, 'Not submitted yet')
+})
 </script>
 
 <template>
@@ -41,7 +46,7 @@ const documentSummary = computed(() => ({
         </div>
         <div class="surface review-card">
           <p class="detail-label">Submitted At</p>
-          <p class="detail-value">{{ applicationStore.lastSubmittedAt || 'Not submitted yet' }}</p>
+          <p class="detail-value">{{ submittedAtDisplay }}</p>
         </div>
         <div class="surface review-card">
           <p class="detail-label">Preferred Town Area</p>

@@ -6,12 +6,13 @@ import {
   type ApplyBtoApplicationPayload,
   type ApplicationMemberRecord,
   type ApplicationRecord,
+  type ProjectRecord,
+  fetchProjects,
   fetchAvailableFlats,
 } from '@/services/api'
 import type { MyInfoPersona } from '@/data/myinfoPersonas'
 
 const STORAGE_KEY = 'hdb-flat-portal-application'
-const DEFAULT_EXERCISE_ID = 6
 
 export type ApplicationStatus = 'editing' | 'processing' | 'successful' | 'balloted' | 'selected'
 export type HouseholdMemberRole = 'CO_APPLICANT' | 'OCCUPANT'
@@ -105,7 +106,7 @@ const fieldLabels: Record<keyof ApplicationForm, string> = {
   flatType: 'Flat type',
 }
 
-const townOptions = ['Tengah', 'Kallang/Whampoa', 'Queenstown', 'Punggol'] as const
+const fallbackTownOptions = ['Tengah', 'Kallang/Whampoa', 'Queenstown', 'Punggol'] as const
 
 const developmentByTown: Record<string, string> = {
   Tengah: 'Tengah Garden Walk',
@@ -115,10 +116,10 @@ const developmentByTown: Record<string, string> = {
 }
 
 const projectIdByTown: Record<string, number> = {
-  Tengah: 1,
-  'Kallang/Whampoa': 52,
-  Queenstown: 51,
-  Punggol: 21,
+  Tengah: 40,
+  'Kallang/Whampoa': 43,
+  Queenstown: 42,
+  Punggol: 41,
 }
 
 const townByProjectId: Record<number, string> = Object.fromEntries(
@@ -374,6 +375,8 @@ export const useApplicationStore = defineStore('application', () => {
   const applicationError = ref('')
   const availableUnitsState = ref<AvailableUnit[]>([])
   const isLoadingAvailableUnits = ref(false)
+  const projectCatalog = ref<ProjectRecord[]>([])
+  const isLoadingProjectCatalog = ref(false)
 
   const availableUnits = computed(() => {
     if (availableUnitsState.value.length > 0) {
@@ -382,7 +385,48 @@ export const useApplicationStore = defineStore('application', () => {
 
     return buildAvailableUnits(form.value.preferredTown)
   })
-  const developmentName = computed(() => developmentByTown[form.value.preferredTown] ?? 'HDB Development')
+  const projectByTown = computed(() => {
+    const map = new Map<string, ProjectRecord>()
+
+    for (const project of projectCatalog.value) {
+      if (project.status !== 'open') {
+        continue
+      }
+
+      const existing = map.get(project.town_name)
+      if (!existing) {
+        map.set(project.town_name, project)
+        continue
+      }
+
+      if (
+        project.exercise_id > existing.exercise_id
+        || (project.exercise_id === existing.exercise_id && project.project_id > existing.project_id)
+      ) {
+        map.set(project.town_name, project)
+      }
+    }
+
+    return map
+  })
+
+  const townOptions = computed(() => {
+    const liveTowns = [...projectByTown.value.keys()].sort((left, right) => left.localeCompare(right))
+    if (liveTowns.length > 0) {
+      return liveTowns
+    }
+
+    return [...fallbackTownOptions]
+  })
+
+  const developmentName = computed(() => {
+    const project = projectByTown.value.get(form.value.preferredTown)
+    if (project) {
+      return project.project_name
+    }
+
+    return developmentByTown[form.value.preferredTown] ?? 'HDB Development'
+  })
   const hasBallotAccess = computed(() => ['balloted', 'selected'].includes(status.value))
   const hasRequiredDocuments = computed(
     () => hasText(documents.value.incomePdfName) && hasText(documents.value.hfeLetterPdfName),
@@ -510,6 +554,50 @@ export const useApplicationStore = defineStore('application', () => {
     }
 
     return linkedApplications.value
+  }
+
+  async function ensureProjectCatalogLoaded(forceRefresh = false) {
+    if (!forceRefresh && projectCatalog.value.length > 0) {
+      return projectCatalog.value
+    }
+
+    if (isLoadingProjectCatalog.value) {
+      return projectCatalog.value
+    }
+
+    isLoadingProjectCatalog.value = true
+    try {
+      const openProjectsResponse = await fetchProjects({ status: 'open' })
+      if (openProjectsResponse.status === 200 && Array.isArray(openProjectsResponse.data.data)) {
+        projectCatalog.value = openProjectsResponse.data.data
+        return projectCatalog.value
+      }
+
+      return projectCatalog.value
+    } finally {
+      isLoadingProjectCatalog.value = false
+    }
+  }
+
+  function resolvePreferredProject(town: string): ProjectRecord | null {
+    const project = projectByTown.value.get(town)
+    if (project) {
+      return project
+    }
+
+    const fallbackProjectId = projectIdByTown[town]
+    if (!fallbackProjectId) {
+      return null
+    }
+
+    return {
+      project_id: fallbackProjectId,
+      exercise_id: 6,
+      project_name: developmentByTown[town] ?? `${town} Project`,
+      town_name: town,
+      flat_types: '',
+      status: 'open',
+    }
   }
 
   function storeApplicationRecord(application: ApplicationRecord) {
@@ -671,17 +759,24 @@ export const useApplicationStore = defineStore('application', () => {
     ]
   }
 
-  function buildApplyBtoApplicationPayload(): ApplyBtoApplicationPayload {
+  async function buildApplyBtoApplicationPayload(): Promise<ApplyBtoApplicationPayload | null> {
+    await ensureProjectCatalogLoaded()
+
+    const resolvedProject = resolvePreferredProject(form.value.preferredTown)
+    if (!resolvedProject) {
+      return null
+    }
+
     return {
       main_applicant_nric: normaliseNric(form.value.nric),
-      exercise_id: DEFAULT_EXERCISE_ID,
-      project_id: projectIdByTown[form.value.preferredTown] ?? 0,
+      exercise_id: resolvedProject.exercise_id,
+      project_id: resolvedProject.project_id,
       flat_type: form.value.flatType,
       members: buildApplicationMembersPayload(),
     }
   }
 
-  function getApplyBtoInitiationPayload() {
+  async function getApplyBtoInitiationPayload() {
     applicationError.value = ''
 
     if (isCurrentSubmitted.value) {
@@ -707,8 +802,14 @@ export const useApplicationStore = defineStore('application', () => {
       return null
     }
 
+    const applicationPayload = await buildApplyBtoApplicationPayload()
+    if (!applicationPayload) {
+      applicationError.value = 'Unable to resolve project and exercise for the selected town right now.'
+      return null
+    }
+
     return {
-      application: buildApplyBtoApplicationPayload(),
+      application: applicationPayload,
       incomeDocument,
       hfeDocument,
     }
@@ -880,7 +981,10 @@ export const useApplicationStore = defineStore('application', () => {
       email: mainApplicantMember?.email ?? '',
       maritalStatus: mainApplicantMember?.marital_status ?? '',
       citizenshipStatus: mainApplicantMember?.citizenship_status ?? '',
-      preferredTown: townByProjectId[application.project_id] ?? '',
+      preferredTown:
+        projectCatalog.value.find((project) => project.project_id === application.project_id)?.town_name
+        ?? townByProjectId[application.project_id]
+        ?? '',
       flatType: application.flat_type,
     }
     mainApplicantProfileLocked.value = false
@@ -916,6 +1020,8 @@ export const useApplicationStore = defineStore('application', () => {
   }
 
   async function loadAvailableUnits() {
+    await ensureProjectCatalogLoaded()
+
     const preferredTown = form.value.preferredTown
     if (!hasText(preferredTown)) {
       availableUnitsState.value = []
@@ -926,9 +1032,9 @@ export const useApplicationStore = defineStore('application', () => {
       town: preferredTown,
     }
 
-    const projectId = projectIdByTown[preferredTown]
-    if (projectId) {
-      params.project_id = projectId
+    const resolvedProject = resolvePreferredProject(preferredTown)
+    if (resolvedProject) {
+      params.project_id = resolvedProject.project_id
     }
 
     if (hasText(form.value.flatType)) {
@@ -1013,6 +1119,8 @@ export const useApplicationStore = defineStore('application', () => {
     developmentName,
     hasBallotAccess,
     hasRequiredDocuments,
+    isLoadingProjectCatalog,
+    ensureProjectCatalogLoaded,
     syncSessionApplications,
     replaceLinkedApplicationsForNric,
     storeApplicationRecord,

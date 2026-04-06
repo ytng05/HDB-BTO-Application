@@ -19,6 +19,12 @@ interface ProjectLookupEntry {
   town: string
 }
 
+export interface ProjectLookupRecord {
+  project_id: number
+  project_name: string
+  town_name: string
+}
+
 export const heroSlides: HeroSlide[] = [
   {
     title: 'Tengah Garden Walk',
@@ -69,46 +75,6 @@ export const upcomingProjects: UpcomingProject[] = [
 ]
 
 const projectLookup: Record<number, ProjectLookupEntry> = {
-  1: {
-    name: 'Tengah Garden Walk',
-    town: 'Tengah',
-  },
-  2: {
-    name: 'Woodlands North Vista',
-    town: 'Woodlands',
-  },
-  11: {
-    name: 'Bedok North Bloom',
-    town: 'Bedok',
-  },
-  12: {
-    name: 'Tampines GreenCourt',
-    town: 'Tampines',
-  },
-  13: {
-    name: 'Yishun RiverVale',
-    town: 'Yishun',
-  },
-  14: {
-    name: 'Woodlands ParkVista',
-    town: 'Woodlands',
-  },
-  15: {
-    name: 'Hougang SpringGrove',
-    town: 'Hougang',
-  },
-  21: {
-    name: 'Punggol SeaVista',
-    town: 'Punggol',
-  },
-  22: {
-    name: 'Sengkang FernSpring',
-    town: 'Sengkang',
-  },
-  23: {
-    name: 'Pasir Ris BlueHaven',
-    town: 'Pasir Ris',
-  },
   24: {
     name: 'Serangoon MeadowRise',
     town: 'Serangoon',
@@ -125,23 +91,19 @@ const projectLookup: Record<number, ProjectLookupEntry> = {
     name: 'Bukit Batok Hillcrest',
     town: 'Bukit Batok',
   },
+  40: {
+    name: 'Tengah Garden Walk',
+    town: 'Tengah',
+  },
   41: {
-    name: 'Toa Payoh CentralTerrace',
-    town: 'Toa Payoh',
+    name: 'Punggol SeaVista',
+    town: 'Punggol',
   },
   42: {
-    name: 'Bishan ParkEdge',
-    town: 'Bishan',
-  },
-  43: {
-    name: 'Ang Mo Kio ForestGlade',
-    town: 'Ang Mo Kio',
-  },
-  51: {
     name: 'Queenstown SkyGrove',
     town: 'Queenstown',
   },
-  52: {
+  43: {
     name: 'Kallang RiverFront',
     town: 'Kallang/Whampoa',
   },
@@ -149,6 +111,19 @@ const projectLookup: Record<number, ProjectLookupEntry> = {
     name: 'Geylang East Crest',
     town: 'Geylang',
   },
+}
+
+export function syncProjectLookup(records: ProjectLookupRecord[]) {
+  for (const record of records) {
+    if (!record || typeof record.project_id !== 'number') {
+      continue
+    }
+
+    projectLookup[record.project_id] = {
+      name: record.project_name,
+      town: record.town_name,
+    }
+  }
 }
 
 export function getProjectName(projectId: number): string {

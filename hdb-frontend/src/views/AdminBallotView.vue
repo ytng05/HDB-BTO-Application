@@ -14,7 +14,8 @@ import {
   type DocumentRecord,
   type FlatSelectionRecord,
 } from '@/services/api'
-import { getProjectTown } from '@/data/projects'
+import { getProjectTown, syncProjectLookup } from '@/data/projects'
+import { formatApiDateTime } from '@/utils/datetime'
 
 type QueueTownFilter = 'all' | string
 
@@ -132,23 +133,7 @@ const roomTypeCards = computed(() => {
 })
 
 function formatDateTime(value: string | null | undefined): string {
-  if (!value) {
-    return 'N/A'
-  }
-
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) {
-    return value
-  }
-
-  return new Intl.DateTimeFormat('en-SG', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(parsed)
+  return formatApiDateTime(value, 'N/A')
 }
 
 function statusChipClass(status: string) {
@@ -183,6 +168,7 @@ function toCronExpression(localDateTime: string) {
 async function loadCurrentProjectScope() {
   const { status, data } = await fetchProjects({ status: 'open' })
   if (status === 200 && Array.isArray(data.data)) {
+    syncProjectLookup(data.data)
     currentProjectIds.value = new Set(data.data.map((project) => project.project_id))
     return
   }
@@ -208,8 +194,9 @@ async function loadApplicationFlatTypeMap() {
 async function loadExercises() {
   isLoadingExercises.value = true
   try {
-    const { status, data } = await fetchProjects()
+    const { status, data } = await fetchProjects({ status: 'open' })
     if (status === 200 && Array.isArray(data.data)) {
+      syncProjectLookup(data.data)
       const ids = [...new Set(data.data.map((project) => project.exercise_id))]
       exerciseIds.value = ids.sort((a, b) => a - b)
     } else {

@@ -46,7 +46,7 @@ async function confirmPayment() {
   paymentStep.value = 'initiating'
   paymentError.value = ''
 
-  const submission = applicationStore.getApplyBtoInitiationPayload()
+  const submission = await applicationStore.getApplyBtoInitiationPayload()
   if (!submission) {
     paymentError.value = applicationStore.applicationError || 'Please complete your application before paying.'
     paymentStep.value = 'error'

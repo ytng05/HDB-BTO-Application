@@ -709,6 +709,8 @@ def project_has_flat_selection_failures(project_result):
         flat_selection = entry.get("flat_selection")
         if not isinstance(flat_selection, dict):
             continue
+        if flat_selection.get("existing"):
+            continue
         if flat_selection.get("created"):
             continue
         return True
@@ -824,6 +826,7 @@ def process_project(project, applications, chance_map):
                 "queue_result": "queued",
                 "flat_selection": {
                     "created": False,
+                    "existing": False,
                     "selection_id": None,
                     "message": "Skipped because application payload is incomplete.",
                 },
@@ -848,6 +851,7 @@ def process_project(project, applications, chance_map):
                 group_entries_pending_bulk.append(entry)
                 entry["flat_selection"] = {
                     "created": False,
+                    "existing": False,
                     "selection_id": None,
                     "message": "Pending flat-selection bulk write.",
                 }
@@ -875,6 +879,7 @@ def process_project(project, applications, chance_map):
                         group_write_failures += 1
                         entry["flat_selection"] = {
                             "created": False,
+                            "existing": False,
                             "selection_id": None,
                             "message": warning,
                         }
@@ -885,6 +890,7 @@ def process_project(project, applications, chance_map):
                         group_created_entries += 1
                         entry["flat_selection"] = {
                             "created": True,
+                            "existing": False,
                             "selection_id": selection_result["selection_id"],
                             "message": "Queue entry created.",
                         }
@@ -892,6 +898,7 @@ def process_project(project, applications, chance_map):
                         group_existing_entries += 1
                         entry["flat_selection"] = {
                             "created": False,
+                            "existing": True,
                             "selection_id": selection_result["selection_id"],
                             "message": selection_result["message"],
                         }
@@ -899,6 +906,7 @@ def process_project(project, applications, chance_map):
                         group_write_failures += 1
                         entry["flat_selection"] = {
                             "created": False,
+                            "existing": False,
                             "selection_id": selection_result["selection_id"],
                             "message": selection_result["message"],
                         }
@@ -912,6 +920,7 @@ def process_project(project, applications, chance_map):
                 for entry in group_entries_pending_bulk:
                     entry["flat_selection"] = {
                         "created": False,
+                        "existing": False,
                         "selection_id": None,
                         "message": warning,
                     }
