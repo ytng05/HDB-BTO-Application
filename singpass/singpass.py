@@ -417,15 +417,8 @@ def build_public_base_url() -> str:
     return request.host_url.rstrip("/")
 
 
-# ---------------------------------------------------------------------------
-# API Endpoints
-# ---------------------------------------------------------------------------
-
-@app.route("/singpass/auth/login", methods=["GET"])
-def singpass_auth_login():
-    """Start browser login flow by redirecting to MockPass authorize endpoint."""
-    redirect_path = sanitise_redirect_path(request.args.get("redirect"))
-    login_hint = request.args.get("login_hint", "").strip()  # OIDC standard parameter
+def build_mockpass_auth_url(redirect_path: str, login_hint: str = "") -> str:
+    """Build MockPass authorize URL for the current request context."""
     state, nonce = create_auth_state(redirect_path)
 
     params = {
@@ -437,9 +430,22 @@ def singpass_auth_login():
         "nonce": nonce,
     }
 
-    # Pass login_hint to MockPass if provided (for NRIC pre-fill/hint)
     if login_hint:
         params["login_hint"] = login_hint
+
+    return f"{MOCKPASS_BROWSER_URL.rstrip('/')}{MOCKPASS_AUTH_PATH}?{urlencode(params)}"
+
+
+# ---------------------------------------------------------------------------
+# API Endpoints
+# ---------------------------------------------------------------------------
+
+@app.route("/singpass/auth/login", methods=["GET"])
+def singpass_auth_login():
+    """Start browser login flow by redirecting to MockPass authorize endpoint."""
+    redirect_path = sanitise_redirect_path(request.args.get("redirect"))
+    login_hint = request.args.get("login_hint", "").strip()  # OIDC standard parameter
+    auth_url = build_mockpass_auth_url(redirect_path, login_hint=login_hint)
 
     log_usage(
         action="auth_start",
@@ -448,8 +454,51 @@ def singpass_auth_login():
         detail=f"redirect={redirect_path}" + (f" login_hint={login_hint}" if login_hint else ""),
     )
 
-    auth_url = f"{MOCKPASS_BROWSER_URL.rstrip('/')}{MOCKPASS_AUTH_PATH}?{urlencode(params)}"
     return redirect(auth_url)
+
+
+@app.route("/singpass/login", methods=["GET", "POST", "OPTIONS"])
+def legacy_singpass_login():
+    """Backward-compatible login endpoint used by older frontend builds."""
+    if request.method == "OPTIONS":
+        return "", 204
+
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    redirect_path = sanitise_redirect_path(
+        payload.get("redirect")
+        or request.args.get("redirect")
+    )
+    login_hint = str(
+        payload.get("login_hint")
+        or payload.get("nric")
+        or payload.get("applicant_nric")
+        or request.args.get("login_hint")
+        or ""
+    ).strip()
+
+    auth_url = build_mockpass_auth_url(redirect_path, login_hint=login_hint)
+    log_usage(
+        action="auth_start_legacy",
+        status="redirect",
+        source="mockpass",
+        detail=f"redirect={redirect_path}" + (f" login_hint={login_hint}" if login_hint else ""),
+    )
+
+    if request.method == "GET":
+        return redirect(auth_url)
+
+    return jsonify(
+        {
+            "code": 200,
+            "data": {
+                "login_url": auth_url,
+                "redirect_path": redirect_path,
+            },
+        }
+    ), 200
 
 
 @app.route("/singpass/auth/callback", methods=["GET"])

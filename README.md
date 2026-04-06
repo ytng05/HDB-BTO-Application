@@ -14,8 +14,10 @@ A microservices-based HDB BTO flat application portal built with Vue 3, Flask, a
 | `ballot-audit-service` | 5000 | Stores ballot run audit records |
 | `flat-service` | 5006 | Provides available flat inventory by project |
 | `flat-selection-service` | 5002 | Stores queue entries for ballot outcomes |
-| `project-service` | 5012 | Source of truth for exercises and project ballot status |
 | `process-ballot-service` | 5011 | Orchestrates ballot runs across services |
+
+Projects are now sourced from the external OutSystems endpoint:
+`https://personal-iu6aefgj.outsystemscloud.com/ProjectsMicroservice/rest/ProjectsAPI/projects`
 
 ---
 

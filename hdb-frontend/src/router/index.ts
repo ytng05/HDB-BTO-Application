@@ -40,6 +40,7 @@ const router = createRouter({
     },
     {
       path: '/auth/:pathMatch(.*)*',
+      component: HomeView,
       beforeEnter: (to) => {
         const raw = to.params.pathMatch
         const value = Array.isArray(raw) ? raw.join('/') : String(raw ?? '')

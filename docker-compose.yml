@@ -244,26 +244,26 @@ services:
     restart: always
 
   # Notification Service — RabbitMQ wrapper API
-  notification-api:
-    build:
-      context: ./cloudamqp
-      dockerfile: Dockerfile
-    container_name: notification_api
-    ports:
-      - "5015:5000"
-    env_file:
-      - ./cloudamqp/.env
-    restart: always
+  # notification-api:
+  #   build:
+  #     context: ./cloudamqp
+  #     dockerfile: Dockerfile
+  #   container_name: notification_api
+  #   ports:
+  #     - "5015:5000"
+  #   env_file:
+  #     - ./cloudamqp/.env
+  #   restart: always
 
   # Notification Service — RabbitMQ consumer + Twilio SMS
-  notification-consumer:
-    build:
-      context: ./cloudamqp
-      dockerfile: Dockerfile.consumer
-    container_name: notification_consumer
-    env_file:
-      - ./cloudamqp/.env
-    restart: always
+  # notification-consumer:
+  #   build:
+  #     context: ./cloudamqp
+  #     dockerfile: Dockerfile.consumer
+  #   container_name: notification_consumer
+  #   env_file:
+  #     - ./cloudamqp/.env
+  #   restart: always
 
   ballot-audit-db:
     image: mysql:8.0
@@ -350,32 +350,6 @@ services:
       - flat-selection-db
     restart: always
 
-  project-db:
-    image: mysql:8.0
-    container_name: project_db
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: projects
-    ports:
-      - "3312:3306"
-    volumes:
-      - project_db_data:/var/lib/mysql
-      - ./project/projects.sql:/docker-entrypoint-initdb.d/projects.sql:ro
-    restart: always
-
-  project-service:
-    build:
-      context: ./project
-      dockerfile: Dockerfile
-    container_name: project_service
-    ports:
-      - "5012:5012"
-    environment:
-      DATABASE_URL: mysql+mysqlconnector://root:root@project-db:3306/projects
-    depends_on:
-      - project-db
-    restart: always
-
   process-ballot-service:
     build:
       context: ./process_ballot
@@ -387,17 +361,28 @@ services:
       BALLOT_AUDIT_SERVICE_URL: http://ballot-audit-service:5000
       BALLOT_SERVICE_URL: http://ballot-service:5005
       APPLICATION_SERVICE_URL: http://application-service:5004
-      PROJECT_SERVICE_URL: http://project-service:5012
+      PROJECT_SERVICE_URL: ${PROJECT_SERVICE_URL:-https://personal-iu6aefgj.outsystemscloud.com/ProjectsMicroservice/rest/ProjectsAPI}
       VALIDATE_ELIGIBILITY_SERVICE_URL: http://validate-eligibility-service:5013
       FLAT_SELECTION_SERVICE_URL: http://flat-selection-service:5002
       REQUEST_TIMEOUT_SECONDS: 20
     depends_on:
       - application-service
-      - project-service
       - validate-eligibility-service
       - ballot-service
       - flat-selection-service
     restart: always
+
+  outsystems-project-seeder:
+    image: python:3.12-slim
+    container_name: outsystems_project_seeder
+    command: ["python", "/seed/seed_outsystems_projects.py"]
+    environment:
+      OUTSYSTEMS_PROJECT_API_URL: ${OUTSYSTEMS_PROJECT_API_URL:-https://personal-iu6aefgj.outsystemscloud.com/ProjectsMicroservice/rest/ProjectsAPI}
+      OUTSYSTEMS_SEED_TIMEOUT_SECONDS: ${OUTSYSTEMS_SEED_TIMEOUT_SECONDS:-20}
+      OUTSYSTEMS_SEED_STRICT: ${OUTSYSTEMS_SEED_STRICT:-false}
+    volumes:
+      - ./scripts/seed_outsystems_projects.py:/seed/seed_outsystems_projects.py:ro
+    restart: "no"
 
 volumes:
   kong_pgdata:
@@ -407,4 +392,3 @@ volumes:
   ballot_audit_db_data:
   flat_db_data:
   flat_selection_db_data:
-  project_db_data:

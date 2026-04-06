@@ -2,58 +2,80 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
 import { pinia } from './stores/pinia'
-import { looksLikeNric } from './utils/validation'
 import './assets/main.css'
 
-const AUTH_STORAGE_KEY = 'hdb-flat-portal-auth'
+const RUNTIME_CACHE_CLEANUP_KEY = '__hdb_runtime_cache_cleanup_done'
 
-function toApplicantId(nric: string): number {
-  const digits = nric.replace(/\D/g, '').slice(0, 6)
-  return Number.parseInt(digits || '100001', 10)
-}
-
-function getSafeRedirectPath(rawPath: string | null): string {
-  if (!rawPath || !rawPath.startsWith('/') || rawPath.startsWith('//')) {
-    return '/'
-  }
-  return rawPath
-}
-
-function consumeAuthCallbackOnBoot(): boolean {
-  const normalizedPath = window.location.pathname.replace(/\/+$/, '').toLowerCase()
-  if (!normalizedPath.startsWith('/auth/callback')) {
+function isAuthCallbackPath(): boolean {
+  if (typeof window === 'undefined') {
     return false
   }
 
-  const params = new URLSearchParams(window.location.search)
-  const status = (params.get('status') || '').toLowerCase()
-  const redirectPath = getSafeRedirectPath(params.get('redirect'))
+  const normalizedPath = window.location.pathname.replace(/\/+$/, '').toLowerCase()
+  return normalizedPath.startsWith('/auth/callback')
+}
 
-  if (status === 'success') {
-    const nric = (params.get('nric') || '').trim().toUpperCase()
-    const nameFromQuery = (params.get('name') || '').trim()
+if (isAuthCallbackPath()) {
+  const app = createApp(App)
+  app.use(pinia)
+  app.use(router)
+  app.mount('#app')
+} else {
+  void (async () => {
+    const cleanupTriggeredReload = await cleanupLegacyRuntimeCaches()
+    if (cleanupTriggeredReload) {
+      return
+    }
 
-    if (looksLikeNric(nric)) {
-      const payload = {
-        applicant_id: toApplicantId(nric),
-        name: nameFromQuery || nric,
-        nric,
+    const app = createApp(App)
+
+    app.use(pinia)
+    app.use(router)
+
+    app.mount('#app')
+  })()
+}
+
+async function cleanupLegacyRuntimeCaches(): Promise<boolean> {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  if (window.sessionStorage.getItem(RUNTIME_CACHE_CLEANUP_KEY) === '1') {
+    return false
+  }
+
+  let didCleanup = false
+
+  if ('serviceWorker' in navigator) {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations()
+      if (registrations.length > 0) {
+        await Promise.all(registrations.map((registration) => registration.unregister()))
+        didCleanup = true
       }
-      window.sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload))
+    } catch {
+      // Best-effort only: app should still boot even if cleanup fails.
     }
   }
 
-  window.location.replace(redirectPath)
-  return true
-}
+  if ('caches' in window) {
+    try {
+      const keys = await caches.keys()
+      if (keys.length > 0) {
+        await Promise.all(keys.map((key) => caches.delete(key)))
+        didCleanup = true
+      }
+    } catch {
+      // Best-effort only: app should still boot even if cleanup fails.
+    }
+  }
 
-if (consumeAuthCallbackOnBoot()) {
-  // Callback was consumed and browser navigation is in progress.
-} else {
-  const app = createApp(App)
+  if (didCleanup) {
+    window.sessionStorage.setItem(RUNTIME_CACHE_CLEANUP_KEY, '1')
+    window.location.replace(window.location.href)
+    return true
+  }
 
-  app.use(pinia)
-  app.use(router)
-
-  app.mount('#app')
+  return false
 }

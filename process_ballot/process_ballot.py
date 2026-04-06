@@ -14,7 +14,10 @@ from flasgger import Swagger
 BALLOT_AUDIT_SERVICE_URL = os.environ.get("BALLOT_AUDIT_SERVICE_URL", "http://localhost:5000")
 BALLOT_SERVICE_URL = os.environ.get("BALLOT_SERVICE_URL", "http://localhost:5005")
 APPLICATION_SERVICE_URL = os.environ.get("APPLICATION_SERVICE_URL", "http://localhost:5004")
-PROJECT_SERVICE_URL = os.environ.get("PROJECT_SERVICE_URL", "http://localhost:5012")
+PROJECT_SERVICE_URL = os.environ.get(
+    "PROJECT_SERVICE_URL",
+    "https://personal-iu6aefgj.outsystemscloud.com/ProjectsMicroservice/rest/ProjectsAPI",
+)
 VALIDATE_ELIGIBILITY_SERVICE_URL = os.environ.get("VALIDATE_ELIGIBILITY_SERVICE_URL", "http://localhost:5013")
 FLAT_SELECTION_SERVICE_URL = os.environ.get("FLAT_SELECTION_SERVICE_URL", "http://localhost:5002")
 REQUEST_TIMEOUT = float(os.environ.get("REQUEST_TIMEOUT_SECONDS", "20"))
@@ -209,6 +212,9 @@ def fetch_projects_for_exercise(exercise_id):
         return []
 
     rows = payload.get("data")
+    if rows is None:
+        # Defensive support for alternate envelope casing used by some gateways.
+        rows = payload.get("Data")
     if not isinstance(rows, list):
         raise BallotOrchestrationError("Project service returned an invalid project payload.", 502)
     log_action("Fetched projects for exercise", exercise_id=exercise_id, project_count=len(rows))

@@ -9,6 +9,7 @@
 
 ADMIN=http://localhost:8001
 ENABLE_PROCESS_BALLOT_KEY_AUTH=${ENABLE_PROCESS_BALLOT_KEY_AUTH:-true}
+OUTSYSTEMS_PROJECT_API_URL=${OUTSYSTEMS_PROJECT_API_URL:-https://personal-iu6aefgj.outsystemscloud.com/ProjectsMicroservice/rest/ProjectsAPI}
 
 # Wait for Kong Admin API to be ready
 echo "Waiting for Kong Admin API..."
@@ -85,7 +86,7 @@ create_service "ballot-audit" "http://ballot-audit-service:5000"
 create_route   "ballot-audit" "ballot-audit-list-create-route"  "/ballot-audits"                            '["GET","POST","OPTIONS"]'
 create_route   "ballot-audit" "ballot-audit-update-route"       "~/ballot-audits/[0-9]+$"                   '["PUT","OPTIONS"]'
 
-create_service "project"      "http://project-service:5012"
+create_service "project"      "$OUTSYSTEMS_PROJECT_API_URL"
 create_route   "project"      "project-list-route"              "/projects"                                 '["GET","OPTIONS"]'
 
 # ─── Scenario 3: Flat Selection ──────────────────────────────────────────────

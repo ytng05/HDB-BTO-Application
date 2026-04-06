@@ -44,7 +44,7 @@ function confirmRedirectToMockPass() {
   // Show a short transition state before handing over to Singpass.
   window.setTimeout(() => {
     window.location.assign(pendingLoginUrl.value)
-  }, 150)
+  }, 25)
 }
 
 const navLinks = computed(() => {
