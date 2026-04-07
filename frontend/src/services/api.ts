@@ -383,20 +383,27 @@ export async function initiateApplyBtoSubmission(
   return response.data
 }
 
+
 export async function completeApplyBtoSubmission(
   merchantTxnRef: string,
 ): Promise<{ status: number; data: ApplyBtoCompletionResult }> {
-  const response = await applyBtoApi.post<ApplyBtoCompletionResult>(
-    `/apply-bto/complete/${encodeURIComponent(merchantTxnRef)}`,
-    undefined,
-    {
-      validateStatus: () => true,
-    },
-  )
-
-  return {
-    status: response.status,
-    data: response.data,
+  try {
+    const response = await applyBtoApi.post<ApplyBtoCompletionResult>(
+      `/apply-bto/complete/${encodeURIComponent(merchantTxnRef)}`
+    );
+    return {
+      status: response.status,
+      data: response.data,
+    };
+  } catch (error: any) {
+    if (error.response) {
+      // Backend returned an error status code (e.g., 404, 402, 502)
+      return {
+        status: error.response.status,
+        data: error.response.data,
+      };
+    }
+    throw error;
   }
 }
 

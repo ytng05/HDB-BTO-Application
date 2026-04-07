@@ -5,6 +5,10 @@ const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? 'http://localhos
 const SINGPASS_API_URL = import.meta.env.VITE_SINGPASS_URL ?? API_GATEWAY_URL
 const SINGPASS_SESSIONS_ENABLED = (import.meta.env.VITE_SINGPASS_USE_SESSIONS ?? 'true').toLowerCase() === 'true'
 const SESSION_CREDENTIALS: RequestCredentials = SINGPASS_SESSIONS_ENABLED ? 'include' : 'omit'
+const SESSION_VALIDATION_TTL_MS = 15000
+let lastSessionValidatedAt = 0
+let lastSessionValidationResult = false
+let inFlightSessionValidation: Promise<boolean> | null = null
 
 export function getSingpassAuthLoginUrl(redirectPath = '/'): string {
   return `${SINGPASS_API_URL}/singpass/auth/login?redirect=${encodeURIComponent(redirectPath)}`
@@ -236,12 +240,30 @@ export function validateMyInfoFormat(profile: unknown): boolean {
 }
 
 export async function validateSession(): Promise<boolean> {
-  try {
-    const profile = await getMyInfoProfile()
-    return profile !== null
-  } catch {
-    return false
+  const now = Date.now()
+  if (now - lastSessionValidatedAt < SESSION_VALIDATION_TTL_MS) {
+    return lastSessionValidationResult
   }
+
+  if (inFlightSessionValidation) {
+    return inFlightSessionValidation
+  }
+
+  inFlightSessionValidation = (async () => {
+    try {
+      const profile = await getMyInfoProfile()
+      lastSessionValidationResult = profile !== null
+      return lastSessionValidationResult
+    } catch {
+      lastSessionValidationResult = false
+      return false
+    } finally {
+      lastSessionValidatedAt = Date.now()
+      inFlightSessionValidation = null
+    }
+  })()
+
+  return inFlightSessionValidation
 }
 
 export function mapMaritalStatus(code: string | undefined): string {
