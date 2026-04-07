@@ -8,7 +8,7 @@ import ApplicationStatusStepper from '@/components/ApplicationStatusStepper.vue'
 import { getProjectName, getProjectTown, heroSlides, syncProjectLookup, upcomingProjects, type UpcomingProject } from '@/data/projects'
 import { useApplicationStore } from '@/stores/application'
 import { useAuth } from '@/stores/auth'
-import {
+import {  
   fetchApplications,
   fetchFlatById,
   fetchProjects,
