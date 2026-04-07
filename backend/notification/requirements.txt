@@ -1,0 +1,6 @@
+flask
+pika
+python-dotenv
+gunicorn
+twilio
+sendgrid
