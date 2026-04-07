@@ -1030,7 +1030,9 @@ export const useApplicationStore = defineStore('application', () => {
   }
 
   async function loadAvailableUnits() {
-    await ensureProjectCatalogLoaded()
+    // Load project catalog in the background so flat availability can render immediately
+    // using fallback project mappings when the upstream project service is slow.
+    void ensureProjectCatalogLoaded()
 
     const preferredTown = form.value.preferredTown
     if (!hasText(preferredTown)) {
