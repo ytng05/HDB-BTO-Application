@@ -20,6 +20,8 @@ const trackerSteps = computed(() => {
   const ballotState =
     currentStatus === 'balloted' ? 'active' : currentStatus === 'selected' ? 'complete' : 'locked'
 
+  const flatBookedState = currentStatus === 'selected' ? 'complete' : 'locked'
+
   return [
     {
       label: 'Applied for Flat',
@@ -36,12 +38,17 @@ const trackerSteps = computed(() => {
       state: ballotState,
       icon: ballotState === 'locked' ? Lock : CheckCircle2,
     },
+    {
+      label: 'Flat Booked',
+      state: flatBookedState,
+      icon: flatBookedState === 'locked' ? Lock : CheckCircle2,
+    },
   ]
 })
 </script>
 
 <template>
-  <div class="status-stepper">
+  <div class="status-stepper" :style="{ gridTemplateColumns: `repeat(${trackerSteps.length}, minmax(0, 1fr))` }">
     <div
       v-for="(step, index) in trackerSteps"
       :key="step.label"
@@ -61,7 +68,6 @@ const trackerSteps = computed(() => {
 <style scoped>
 .status-stepper {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
 }
 

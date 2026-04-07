@@ -5,10 +5,13 @@ import { AlertCircle, CheckCircle2, Clock3, FileWarning, XCircle } from 'lucide-
 import { useApplicationStore } from '@/stores/application'
 import {
   abandonNetsPayment,
+  completeFlatAllocation,
   completeApplyBtoSubmission,
   demoForceApplyBtoSuccess,
+  fetchNetsPaymentStatus,
   getErrorMessage,
   type ApplyBtoCompletionResult,
+  type NetsPaymentStatusResult,
 } from '@/services/api'
 
 const route = useRoute()
@@ -16,10 +19,14 @@ const router = useRouter()
 const applicationStore = useApplicationStore()
 const NETS_PAYMENT_REF_KEY = 'nets_last_merchant_txn_ref'
 const NETS_ACTIVE_PAYMENT_REF_KEY = 'nets_active_merchant_txn_ref'
+const NETS_PAYMENT_FLOW_KEY = 'nets_payment_flow'
+const NETS_FLOW_APPLY_BTO = 'apply-bto'
+const NETS_FLOW_FLAT_SELECTION = 'flat-selection'
+const NETS_FLAT_SELECTION_REF_KEY = 'nets_flat_selection_ref'
 const PENDING_POLL_INTERVAL_MS = 4000
 const PENDING_TIMEOUT_MS = 13000
 
-function getStoredPaymentRef(): string | undefined {
+function getStoredApplyPaymentRef(): string | undefined {
   if (typeof window === 'undefined') {
     return undefined
   }
@@ -28,7 +35,25 @@ function getStoredPaymentRef(): string | undefined {
   return refValue && refValue !== 'unknown' ? refValue : undefined
 }
 
-function clearStoredPaymentRef() {
+function getStoredFlatSelectionPaymentRef(): string | undefined {
+  if (typeof window === 'undefined') {
+    return undefined
+  }
+
+  const refValue = window.sessionStorage.getItem(NETS_FLAT_SELECTION_REF_KEY)
+  return refValue && refValue !== 'unknown' ? refValue : undefined
+}
+
+function getStoredPaymentFlow(): 'apply-bto' | 'flat-selection' {
+  if (typeof window === 'undefined') {
+    return NETS_FLOW_APPLY_BTO
+  }
+
+  const storedFlow = window.sessionStorage.getItem(NETS_PAYMENT_FLOW_KEY)
+  return storedFlow === NETS_FLOW_FLAT_SELECTION ? NETS_FLOW_FLAT_SELECTION : NETS_FLOW_APPLY_BTO
+}
+
+function clearStoredApplyPaymentRef() {
   if (typeof window === 'undefined') {
     return
   }
@@ -37,17 +62,35 @@ function clearStoredPaymentRef() {
   window.sessionStorage.removeItem(NETS_ACTIVE_PAYMENT_REF_KEY)
 }
 
+function clearFlatSelectionPaymentContext() {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.sessionStorage.removeItem(NETS_PAYMENT_FLOW_KEY)
+  window.sessionStorage.removeItem(NETS_FLAT_SELECTION_REF_KEY)
+}
+
 const queryRef = computed(() => route.query.ref as string | undefined)
+const queryStatus = computed(() => String(route.query.status ?? '').toLowerCase())
+const paymentFlow = ref<'apply-bto' | 'flat-selection'>(NETS_FLOW_APPLY_BTO)
+const isFlatSelectionFlow = computed(() => paymentFlow.value === NETS_FLOW_FLAT_SELECTION)
 const paymentRef = computed(() => {
   if (queryRef.value && queryRef.value !== 'unknown') {
     return queryRef.value
   }
 
-  return getStoredPaymentRef()
+  if (isFlatSelectionFlow.value) {
+    return getStoredFlatSelectionPaymentRef()
+  }
+
+  return getStoredApplyPaymentRef()
 })
+const retryRoute = computed(() => (isFlatSelectionFlow.value ? '/select-flat' : '/apply/payment'))
 
 const completionStatus = ref<number | null>(null)
 const wrapperResult = ref<ApplyBtoCompletionResult | null>(null)
+const flatSelectionResult = ref<NetsPaymentStatusResult | null>(null)
 const statusMessage = ref('Finalising your application through Apply BTO...')
 const verificationError = ref('')
 const isVerifying = ref(true)
@@ -64,6 +107,34 @@ const paymentStatus = computed(() => wrapperResult.value?.payment_status ?? 'unk
 const isEligible = computed(() => wrapperResult.value?.eligible)
 
 const viewState = computed(() => {
+  if (isFlatSelectionFlow.value) {
+    if (isVerifying.value) {
+      return 'verifying'
+    }
+
+    if (completionStatus.value === 200) {
+      return 'application-successful'
+    }
+
+    if (completionStatus.value === 202) {
+      return 'pending'
+    }
+
+    if (completionStatus.value === 402) {
+      return flatSelectionResult.value?.status === 'cancelled' ? 'cancelled' : 'payment-failed'
+    }
+
+    if (completionStatus.value === 404) {
+      return 'unknown-ref'
+    }
+
+    if (completionStatus.value === 409 || completionStatus.value === 502) {
+      return 'downstream-error'
+    }
+
+    return 'unknown'
+  }
+
   if (isVerifying.value) {
     return 'verifying'
   }
@@ -110,7 +181,7 @@ function schedulePendingPoll() {
   }
 
   pendingPollHandle = window.setTimeout(() => {
-    void finaliseWorkflow()
+    void finaliseApplyBtoWorkflow()
   }, PENDING_POLL_INTERVAL_MS)
 }
 
@@ -153,7 +224,148 @@ function buildCompletedMessage(result: ApplyBtoCompletionResult) {
   return result.message || 'The Apply BTO workflow completed successfully.'
 }
 
-async function finaliseWorkflow() {
+function normaliseMessage(message: string | string[] | undefined, fallback: string): string {
+  if (Array.isArray(message)) {
+    return message.join(' ')
+  }
+
+  if (typeof message === 'string' && message.trim().length > 0) {
+    return message
+  }
+
+  return fallback
+}
+
+async function finaliseFlatSelectionWorkflow() {
+  clearPendingPoll()
+  isVerifying.value = true
+  verificationError.value = ''
+
+  if (!paymentRef.value) {
+    completionStatus.value = 404
+    statusMessage.value = 'Missing transaction reference. Unable to verify this flat booking payment.'
+    isVerifying.value = false
+    return
+  }
+
+  try {
+    const response = await fetchNetsPaymentStatus(paymentRef.value)
+    completionStatus.value = response.status
+
+    const responseMessage = normaliseMessage(response.data.message, '')
+    const resolvedResult: NetsPaymentStatusResult = response.data.data ?? {
+      merchant_txn_ref: paymentRef.value,
+      status: queryStatus.value === 'cancelled' ? 'cancelled' : queryStatus.value === 'failed' ? 'failed' : 'unknown',
+      message: responseMessage || undefined,
+    }
+    flatSelectionResult.value = resolvedResult
+
+    if (response.status === 200) {
+      const completionResponse = await completeFlatAllocation(paymentRef.value)
+      completionStatus.value = completionResponse.status
+
+      const completionPayload = completionResponse.data.data
+      const completionMessage = normaliseMessage(
+        completionResponse.data.message,
+        completionPayload?.message || '',
+      )
+
+      if (completionPayload) {
+        flatSelectionResult.value = {
+          merchant_txn_ref: completionPayload.merchant_txn_ref ?? resolvedResult.merchant_txn_ref,
+          status: completionPayload.payment_status ?? resolvedResult.status,
+          transaction_id: completionPayload.transaction_id ?? resolvedResult.transaction_id ?? null,
+          message: completionPayload.message ?? (completionMessage || resolvedResult.message),
+        }
+      }
+
+      if (completionResponse.status === 200) {
+        statusMessage.value =
+          completionMessage ||
+          completionPayload?.message ||
+          resolvedResult.message ||
+          'Your flat booking payment was verified and finalized successfully.'
+        applicationStore.status = 'selected'
+        applicationStore.queueNumber = null
+        applicationStore.lastSubmittedAt = new Date().toISOString()
+        clearFlatSelectionPaymentContext()
+        return
+      }
+
+      if (completionResponse.status === 202) {
+        statusMessage.value =
+          completionMessage ||
+          completionPayload?.message ||
+          'Payment verification succeeded, but booking completion is still pending. Please check again shortly.'
+        return
+      }
+
+      if (completionResponse.status === 402) {
+        statusMessage.value =
+          completionMessage ||
+          completionPayload?.message ||
+          'Payment did not complete successfully. Please go back and try again.'
+        clearFlatSelectionPaymentContext()
+        return
+      }
+
+      if (completionResponse.status === 404) {
+        statusMessage.value = completionMessage || 'Booking workflow reference could not be found.'
+        clearFlatSelectionPaymentContext()
+        return
+      }
+
+      if (completionResponse.status === 409) {
+        statusMessage.value =
+          completionMessage ||
+          completionPayload?.message ||
+          'Payment was verified but flat booking could not be completed. Please return to flat selection.'
+        clearFlatSelectionPaymentContext()
+        return
+      }
+
+      statusMessage.value =
+        completionMessage ||
+        completionPayload?.message ||
+        'Payment was verified but booking finalization is temporarily unavailable. Please check again.'
+      return
+    }
+
+    if (response.status === 202) {
+      statusMessage.value =
+        resolvedResult.message ||
+        responseMessage ||
+        'Payment is still pending. Please check again shortly.'
+      return
+    }
+
+    if (response.status === 402) {
+      statusMessage.value =
+        resolvedResult.message ||
+        responseMessage ||
+        (queryStatus.value === 'cancelled'
+          ? 'Payment was cancelled. You may go back and try again.'
+          : 'Payment failed. Please go back and try again.')
+      clearFlatSelectionPaymentContext()
+      return
+    }
+
+    if (response.status === 404) {
+      statusMessage.value = responseMessage || 'Payment reference could not be found.'
+      clearFlatSelectionPaymentContext()
+      return
+    }
+
+    statusMessage.value = responseMessage || 'Unable to determine your flat booking payment outcome.'
+  } catch (error) {
+    verificationError.value = getErrorMessage(error, 'Unable to verify this flat booking payment.')
+    statusMessage.value = verificationError.value
+  } finally {
+    isVerifying.value = false
+  }
+}
+
+async function finaliseApplyBtoWorkflow() {
   clearPendingPoll()
   isVerifying.value = true
   verificationError.value = ''
@@ -174,7 +386,7 @@ async function finaliseWorkflow() {
       pendingStartedAt.value = null
       pendingAutoCancelTriggered.value = false
       statusMessage.value = buildCompletedMessage(response.data)
-      clearStoredPaymentRef()
+      clearStoredApplyPaymentRef()
       const completedSuccessfully =
         response.data.eligible === true || response.data.application_status === 'SUCCESSFUL'
 
@@ -210,7 +422,7 @@ async function finaliseWorkflow() {
             message: abandonMessage,
           }
           statusMessage.value = abandonMessage
-          clearStoredPaymentRef()
+          clearStoredApplyPaymentRef()
           pendingStartedAt.value = null
           return
         }
@@ -227,7 +439,7 @@ async function finaliseWorkflow() {
       pendingStartedAt.value = null
       pendingAutoCancelTriggered.value = false
       statusMessage.value = response.data.message || 'Payment did not complete successfully.'
-      clearStoredPaymentRef()
+      clearStoredApplyPaymentRef()
       return
     }
 
@@ -235,7 +447,7 @@ async function finaliseWorkflow() {
       pendingStartedAt.value = null
       pendingAutoCancelTriggered.value = false
       statusMessage.value = response.data.message || 'The Apply BTO transaction reference could not be found.'
-      clearStoredPaymentRef()
+      clearStoredApplyPaymentRef()
       return
     }
 
@@ -275,7 +487,7 @@ async function handleDemoForceSuccess() {
 
     if (response.status === 200) {
       statusMessage.value = buildCompletedMessage(response.data)
-      clearStoredPaymentRef()
+      clearStoredApplyPaymentRef()
       const completedSuccessfully =
         response.data.eligible === true || response.data.application_status === 'SUCCESSFUL'
 
@@ -294,10 +506,22 @@ async function handleDemoForceSuccess() {
   }
 }
 
+async function refreshPaymentOutcome() {
+  if (isFlatSelectionFlow.value) {
+    statusMessage.value = 'Verifying your flat booking payment...'
+    await finaliseFlatSelectionWorkflow()
+    return
+  }
+
+  statusMessage.value = 'Finalising your application through Apply BTO...'
+  await finaliseApplyBtoWorkflow()
+}
+
 onMounted(() => {
+  paymentFlow.value = getStoredPaymentFlow()
   pendingStartedAt.value = null
   pendingAutoCancelTriggered.value = false
-  void finaliseWorkflow()
+  void refreshPaymentOutcome()
 })
 
 onBeforeUnmount(() => {
@@ -312,7 +536,7 @@ onBeforeUnmount(() => {
         <div class="result-icon">
           <Clock3 :size="32" />
         </div>
-        <h1>Finalising Application</h1>
+        <h1>{{ isFlatSelectionFlow ? 'Verifying Flat Booking Payment' : 'Finalising Application' }}</h1>
         <p>{{ statusMessage }}</p>
 
         <div v-if="paymentRef" class="txn-ref">
@@ -325,10 +549,21 @@ onBeforeUnmount(() => {
         <div class="result-icon result-icon--success">
           <CheckCircle2 :size="32" />
         </div>
-        <h1>Application Successful</h1>
+        <h1>{{ isFlatSelectionFlow ? 'Flat Booking Successful' : 'Application Successful' }}</h1>
         <p>{{ statusMessage }}</p>
 
-        <div class="result-summary">
+        <div v-if="isFlatSelectionFlow && flatSelectionResult" class="result-summary">
+          <div class="result-summary__row">
+            <span>Payment Status</span>
+            <strong>{{ formatApplicationStatus(flatSelectionResult.status) }}</strong>
+          </div>
+          <div class="result-summary__row">
+            <span>Transaction Reference</span>
+            <strong>{{ flatSelectionResult.merchant_txn_ref }}</strong>
+          </div>
+        </div>
+
+        <div v-else class="result-summary">
           <div class="result-summary__row">
             <span>Workflow Stage</span>
             <strong>{{ formatStage(workflowStage) }}</strong>
@@ -407,10 +642,11 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="result-actions">
-          <button class="btn btn-secondary" type="button" @click="router.push('/apply/payment')">
+          <button class="btn btn-secondary" type="button" @click="router.push(retryRoute)">
             Try Again
           </button>
           <button
+            v-if="!isFlatSelectionFlow"
             class="btn btn-secondary"
             type="button"
             :disabled="isForcingDemoSuccess"
@@ -432,8 +668,8 @@ onBeforeUnmount(() => {
         <p>{{ statusMessage || 'You cancelled the payment. Your application has not been submitted.' }}</p>
 
         <div class="result-actions">
-          <button class="btn btn-secondary" type="button" @click="router.push('/apply/payment')">
-            Go Back to Payment
+          <button class="btn btn-secondary" type="button" @click="router.push(retryRoute)">
+            {{ isFlatSelectionFlow ? 'Go Back to Flat Selection' : 'Go Back to Payment' }}
           </button>
           <button class="btn btn-primary" type="button" @click="router.push('/')">
             Return Home
@@ -465,7 +701,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="result-actions">
-          <button class="btn btn-secondary" type="button" @click="finaliseWorkflow">
+          <button class="btn btn-secondary" type="button" @click="refreshPaymentOutcome">
             Check Again
           </button>
           <button class="btn btn-primary" type="button" @click="router.push('/')">
@@ -493,7 +729,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="result-actions">
-          <button class="btn btn-secondary" type="button" @click="finaliseWorkflow">
+          <button class="btn btn-secondary" type="button" @click="refreshPaymentOutcome">
             Retry Finalisation
           </button>
           <button class="btn btn-primary" type="button" @click="router.push('/')">
@@ -535,7 +771,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="result-actions">
-          <button v-if="paymentRef" class="btn btn-secondary" type="button" @click="finaliseWorkflow">
+          <button v-if="paymentRef" class="btn btn-secondary" type="button" @click="refreshPaymentOutcome">
             Check Again
           </button>
           <button class="btn btn-primary" type="button" @click="router.push('/')">

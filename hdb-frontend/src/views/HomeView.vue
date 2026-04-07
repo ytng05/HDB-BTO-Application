@@ -10,6 +10,7 @@ import { useApplicationStore } from '@/stores/application'
 import { useAuth } from '@/stores/auth'
 import {
   fetchApplications,
+  fetchFlatById,
   fetchProjects,
   fetchFlatSelections,
   type ApplicationMemberRecord,
@@ -43,6 +44,7 @@ const latestProjectName = computed(() =>
 const launchProjects = ref<UpcomingProject[]>([])
 const launchesError = ref('')
 const flatSelectionByApplicationId = ref<Record<number, FlatSelectionRecord>>({})
+const bookedUnitNumber = ref<string | null>(null)
 const isLoadingLinkedApplications = ref(false)
 const hasFetchedLinkedApplications = ref(false)
 const showLocalWorkflow = computed(
@@ -77,9 +79,107 @@ function hasQueueAndNoFlat(selection: FlatSelectionRecord | null) {
 
   return selection.flat_id === null && selection.queue_number > 0 && queueReadyStatuses.includes(selection.status)
 }
+
+function isBookedSelection(selection: FlatSelectionRecord | null) {
+  if (!selection) {
+    return false
+  }
+
+  return (
+    selection.flat_id !== null
+    || selection.status === 'reserved'
+    || selection.status === 'paid'
+    || selection.status === 'selected'
+  )
+}
+
+const isBookedDashboardState = computed(() => {
+  if (applicationStore.status === 'selected') {
+    return true
+  }
+
+  return isBookedSelection(activeFlatSelection.value)
+})
+
+const bookedUnitDetails = computed(() => {
+  if (!isBookedDashboardState.value) {
+    return null
+  }
+
+  const localUnitNumber = bookedUnitNumber.value ?? applicationStore.selectedUnit?.unitNumber?.trim()
+  const flatId = activeFlatSelection.value?.flat_id
+  const unitFlatId = localUnitNumber || (typeof flatId === 'number' ? `Flat #${flatId}` : 'Not available')
+
+  const projectName = activeApplication.value
+    ? getProjectName(activeApplication.value.project_id)
+    : applicationStore.selectedUnit?.development?.trim() || 'Not available'
+
+  const flatType =
+    activeApplication.value?.flat_type?.trim()
+    || applicationStore.form.flatType?.trim()
+    || 'Not available'
+
+  const reservedDateRaw = activeFlatSelection.value?.reserved_at ?? activeFlatSelection.value?.updated_at ?? null
+  const reservedDate = reservedDateRaw ? formatDate(reservedDateRaw) : 'Not available'
+
+  return {
+    unitFlatId,
+    projectName,
+    flatType,
+    reservedDate,
+  }
+})
+
+function formatUnitLabel(unitNumber: string | null | undefined, floorNumber?: number | null) {
+  const rawUnit = (unitNumber ?? '').trim()
+  if (!rawUnit) {
+    return null
+  }
+
+  const normalizedUnit = rawUnit.replace(/^#/, '')
+  if (normalizedUnit.includes('-')) {
+    return `#${normalizedUnit}`
+  }
+
+  if (Number.isFinite(floorNumber) && typeof floorNumber === 'number' && floorNumber > 0) {
+    const floor = String(Math.trunc(floorNumber)).padStart(2, '0')
+    const unit = normalizedUnit.padStart(2, '0')
+    return `#${floor}-${unit}`
+  }
+
+  return `#${normalizedUnit}`
+}
+
+async function refreshBookedUnitNumber() {
+  bookedUnitNumber.value = null
+
+  const localUnitLabel = formatUnitLabel(applicationStore.selectedUnit?.unitNumber)
+  if (localUnitLabel) {
+    bookedUnitNumber.value = localUnitLabel
+    return
+  }
+
+  const flatId = activeFlatSelection.value?.flat_id
+  if (typeof flatId !== 'number') {
+    return
+  }
+
+  const response = await fetchFlatById(flatId)
+  if (response.status !== 200 || !response.data.data) {
+    return
+  }
+
+  const flatData = response.data.data
+  bookedUnitNumber.value = formatUnitLabel(flatData.unit_number, flatData.floor_number)
+}
+
 const primaryActionLabel = computed(() => {
   if (isLoggedIn.value && !hasFetchedLinkedApplications.value) {
     return 'Loading Applications...'
+  }
+
+  if (isBookedDashboardState.value) {
+    return 'Reserved'
   }
 
   if (applicationStore.hasBallotAccess) {
@@ -96,6 +196,12 @@ const primaryActionLabel = computed(() => {
 
   return 'Start Application'
 })
+
+const isPrimaryActionDisabled = computed(() =>
+  isLoadingLinkedApplications.value
+  || (isLoggedIn.value && !hasFetchedLinkedApplications.value)
+  || isBookedDashboardState.value,
+)
 
 const dashboardTitle = computed(() => {
   if (hasQueueAndNoFlat(activeFlatSelection.value)) {
@@ -184,15 +290,18 @@ const dashboardQueueNumber = computed(() => {
 })
 
 const dashboardStepperStatus = computed<ApplicationStatus | null>(() => {
-  if (applicationStore.hasBallotAccess || hasQueueAndNoFlat(activeFlatSelection.value)) {
-    return 'balloted'
+  if (applicationStore.status === 'selected') {
+    return 'selected'
   }
 
   if (activeFlatSelection.value) {
-    const status = activeFlatSelection.value.status
-    if (activeFlatSelection.value.flat_id !== null || status === 'reserved' || status === 'paid') {
+    if (isBookedSelection(activeFlatSelection.value)) {
       return 'selected'
     }
+  }
+
+  if (applicationStore.status === 'balloted' || hasQueueAndNoFlat(activeFlatSelection.value)) {
+    return 'balloted'
   }
 
   if (activeApplication.value?.application_status === 'SUCCESSFUL') {
@@ -260,6 +369,7 @@ async function refreshFlatSelections() {
 
   flatSelectionByApplicationId.value = latestByApplication
   syncWorkflowFromBallotResults()
+  await refreshBookedUnitNumber()
 }
 
 async function refreshLinkedApplications() {
@@ -309,7 +419,7 @@ function syncWorkflowFromBallotResults() {
     return
   }
 
-  if (latestSelection.flat_id !== null || latestSelection.status === 'reserved' || latestSelection.status === 'paid') {
+  if (isBookedSelection(latestSelection)) {
     applicationStore.status = 'selected'
     applicationStore.queueNumber = null
     return
@@ -459,6 +569,7 @@ onMounted(async () => {
     await refreshFlatSelections()
   } catch {
     flatSelectionByApplicationId.value = {}
+    bookedUnitNumber.value = null
   }
 })
 
@@ -473,12 +584,20 @@ watch(currentNric, async () => {
     await refreshFlatSelections()
   } catch {
     flatSelectionByApplicationId.value = {}
+    bookedUnitNumber.value = null
   }
 })
 
 watch(activeApplication, () => {
   syncWorkflowFromBallotResults()
 })
+
+watch(
+  () => activeFlatSelection.value?.flat_id,
+  () => {
+    void refreshBookedUnitNumber()
+  },
+)
 </script>
 
 <template>
@@ -507,6 +626,28 @@ watch(activeApplication, () => {
           <ApplicationStatusStepper :status="dashboardStepperStatus" />
         </div>
 
+        <div v-if="bookedUnitDetails" class="surface dashboard-booked">
+          <p class="dashboard-booked__label">Booked Unit Details</p>
+          <dl class="dashboard-booked__grid">
+            <div class="dashboard-booked__item">
+              <dt>Unit / Flat ID</dt>
+              <dd>{{ bookedUnitDetails.unitFlatId }}</dd>
+            </div>
+            <div class="dashboard-booked__item">
+              <dt>Project</dt>
+              <dd>{{ bookedUnitDetails.projectName }}</dd>
+            </div>
+            <div class="dashboard-booked__item">
+              <dt>Flat Type</dt>
+              <dd>{{ bookedUnitDetails.flatType }}</dd>
+            </div>
+            <div class="dashboard-booked__item">
+              <dt>Reserved Date</dt>
+              <dd>{{ bookedUnitDetails.reservedDate }}</dd>
+            </div>
+          </dl>
+        </div>
+
         <div class="surface dashboard-summary">
           <div class="dashboard-summary__header">
             <div>
@@ -516,7 +657,7 @@ watch(activeApplication, () => {
             <button
               class="btn btn-primary dashboard-summary__button"
               type="button"
-              :disabled="isLoadingLinkedApplications || (isLoggedIn && !hasFetchedLinkedApplications)"
+              :disabled="isPrimaryActionDisabled"
               @click="startApplicationFlow"
             >
               {{ primaryActionLabel }}
@@ -663,6 +804,51 @@ watch(activeApplication, () => {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: rgba(29, 29, 31, 0.56);
+}
+
+.dashboard-booked {
+  margin-top: 18px;
+  padding: 20px;
+}
+
+.dashboard-booked__label {
+  margin: 0 0 14px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(29, 29, 31, 0.56);
+}
+
+.dashboard-booked__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.dashboard-booked__item {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(29, 29, 31, 0.12);
+  background: rgba(29, 29, 31, 0.02);
+}
+
+.dashboard-booked__item dt {
+  margin: 0;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(29, 29, 31, 0.5);
+}
+
+.dashboard-booked__item dd {
+  margin: 6px 0 0;
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: rgba(29, 29, 31, 0.86);
 }
 
 .dashboard-summary {
@@ -897,6 +1083,10 @@ watch(activeApplication, () => {
 @media (max-width: 960px) {
   .application-grid,
   .launch-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-booked__grid {
     grid-template-columns: 1fr;
   }
 

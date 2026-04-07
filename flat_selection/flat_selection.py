@@ -509,7 +509,7 @@ def reserve_selection(selection_id):
     if parse_positive_int(flat_id) is None:
         return jsonify({"code": 400, "message": "flat_id is required and must be a positive integer."}), 400
 
-    if selection.status != "selecting":
+    if selection.status not in ("balloted", "selecting"):
         return jsonify({
             "code": 409,
             "message": f"Cannot reserve. Current status: {selection.status}",

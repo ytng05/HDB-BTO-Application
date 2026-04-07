@@ -1,15 +1,30 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { Building2, Hash, MapPinned, Ruler, SunMedium, CheckCircle2 } from 'lucide-vue-next'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { Building2, Hash, MapPinned, Ruler, SunMedium } from 'lucide-vue-next'
 import SelectionModal from '@/components/SelectionModal.vue'
+import { useAuth } from '@/stores/auth'
 import { useApplicationStore, type AvailableUnit } from '@/stores/application'
+import {
+  fetchFlatSelections,
+  getErrorMessage,
+  selectFlatAllocation,
+  type FlatSelectionRecord,
+} from '@/services/api'
 
 const applicationStore = useApplicationStore()
+const { applicantNric } = useAuth()
+
+const socket = ref<WebSocket | null>(null)
 
 const focusedUnit = ref<AvailableUnit | null>(applicationStore.selectedUnit)
 const isModalOpen = ref(false)
-const successMessage = ref('')
+const isSubmittingSelection = ref(false)
 const loadError = ref('')
+const bookingError = ref('')
+
+const NETS_PAYMENT_FLOW_KEY = 'nets_payment_flow'
+const NETS_FLOW_FLAT_SELECTION = 'flat-selection'
+const NETS_FLAT_SELECTION_REF_KEY = 'nets_flat_selection_ref'
 
 // Floor filter — empty set means "show all"
 const selectedFloors = ref<Set<number>>(new Set())
@@ -72,7 +87,7 @@ function formatCurrency(value: number) {
 
 function focusUnit(unit: AvailableUnit) {
   if (applicationStore.status === 'selected') return
-  successMessage.value = ''
+  bookingError.value = ''
   focusedUnit.value = unit
 }
 
@@ -80,11 +95,132 @@ function closeConfirmModal() {
   isModalOpen.value = false
 }
 
-function confirmUnitSelection() {
+function normaliseMessage(message: string | string[] | undefined, fallback: string): string {
+  if (Array.isArray(message)) {
+    return message.join(' ')
+  }
+
+  if (typeof message === 'string' && message.trim().length > 0) {
+    return message
+  }
+
+  return fallback
+}
+
+function getRecordSortTime(record: FlatSelectionRecord): number {
+  const value = Date.parse(record.updated_at ?? record.created_at ?? '')
+  return Number.isNaN(value) ? 0 : value
+}
+
+function resolveSelectionId(records: FlatSelectionRecord[]): number | null {
+  const eligibleRecords = records.filter((record) => record.status === 'balloted' || record.status === 'selecting')
+  if (eligibleRecords.length === 0) {
+    return null
+  }
+
+  const sorted = [...eligibleRecords].sort((left, right) => {
+    const delta = getRecordSortTime(right) - getRecordSortTime(left)
+    if (delta !== 0) {
+      return delta
+    }
+
+    return right.selection_id - left.selection_id
+  })
+
+  return sorted[0]?.selection_id ?? null
+}
+
+function submitToNets(gatewayUrl: string, payload: string, hmac: string, apiKeyId: string) {
+  const form = document.createElement('form')
+  form.method = 'POST'
+  form.action = gatewayUrl
+
+  const fields: Record<string, string> = {
+    apiKey: apiKeyId,
+    payload,
+    hmac,
+  }
+
+  for (const [name, value] of Object.entries(fields)) {
+    const input = document.createElement('input')
+    input.type = 'hidden'
+    input.name = name
+    input.value = value
+    form.appendChild(input)
+  }
+
+  document.body.appendChild(form)
+  form.submit()
+  document.body.removeChild(form)
+}
+
+async function confirmUnitSelection() {
   if (!focusedUnit.value) return
-  applicationStore.reserveUnit(focusedUnit.value)
-  successMessage.value = `Booked — Unit ${focusedUnit.value.unitNumber} reserved under your name`
-  isModalOpen.value = false
+
+  const nric = (applicantNric.value ?? applicationStore.form.nric).trim().toUpperCase()
+  if (!nric) {
+    bookingError.value = 'Unable to identify the applicant NRIC for this booking.'
+    return
+  }
+
+  isSubmittingSelection.value = true
+  bookingError.value = ''
+
+  try {
+    const selectionResponse = await fetchFlatSelections({ applicant_nric: nric })
+    if (selectionResponse.status !== 200 || !Array.isArray(selectionResponse.data.data)) {
+      const message = normaliseMessage(
+        selectionResponse.data.message,
+        'Unable to load your flat selection record at the moment.',
+      )
+      throw new Error(message)
+    }
+
+    const selectionId = resolveSelectionId(selectionResponse.data.data)
+    if (!selectionId) {
+      throw new Error('No balloted or selecting flat selection record is available for this applicant.')
+    }
+
+    const bookingResponse = await selectFlatAllocation({
+      applicant_id: nric,
+      selection_id: selectionId,
+      flat_id: focusedUnit.value.id,
+      payment_amount: 10,
+    })
+
+    if (bookingResponse.status !== 200 || !bookingResponse.data.data) {
+      const message = normaliseMessage(
+        bookingResponse.data.message,
+        'Unable to initiate NETS payment for flat booking.',
+      )
+      throw new Error(message)
+    }
+
+    const result = bookingResponse.data.data
+    const paymentPayload = result.payment ?? {}
+    const gatewayUrl = result.gateway_url || paymentPayload.gateway_url || ''
+    const payload = result.payload || paymentPayload.payload || ''
+    const hmac = result.hmac || paymentPayload.hmac || ''
+    const apiKeyId = result.api_key_id || paymentPayload.api_key_id || ''
+
+    if (!gatewayUrl || !payload || !hmac || !apiKeyId) {
+      throw new Error('Payment gateway payload is incomplete. Please try again.')
+    }
+
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(NETS_PAYMENT_FLOW_KEY, NETS_FLOW_FLAT_SELECTION)
+      if (result.merchant_txn_ref) {
+        window.sessionStorage.setItem(NETS_FLAT_SELECTION_REF_KEY, result.merchant_txn_ref)
+      }
+    }
+
+    isModalOpen.value = false
+    submitToNets(gatewayUrl, payload, hmac, apiKeyId)
+  } catch (error) {
+    bookingError.value = getErrorMessage(error, 'Unable to start the flat booking payment workflow.')
+  } finally {
+    isSubmittingSelection.value = false
+  }
 }
 
 function openConfirmModal() {
@@ -99,7 +235,27 @@ onMounted(async () => {
   } catch {
     loadError.value = 'Unable to load available flats at the moment.'
   }
+    socket.value = new WebSocket('ws://localhost:5017')
+
+    socket.value.onmessage = (event) => {
+    const data = JSON.parse(event.data) as { flat_id: number; status: string }
+    if (data.status === 'reserved') {
+      applicationStore.removeUnit(data.flat_id)
+    } else if (data.status === 'available') {
+      applicationStore.loadAvailableUnits()
+    }
+  }
+
+  socket.value.onerror = (err) => {
+    console.warn('WebSocket error:', err)
+  }
 })
+
+onUnmounted(() => {
+  socket.value?.close()
+  socket.value = null
+})
+
 </script>
 
 <template>
@@ -115,10 +271,7 @@ onMounted(async () => {
 
       <p v-else-if="applicationStore.isLoadingAvailableUnits" class="load-hint">Loading available flats...</p>
 
-      <div v-if="successMessage" class="success-banner">
-        <CheckCircle2 :size="18" />
-        <span>{{ successMessage }}</span>
-      </div>
+      <p v-if="bookingError" class="load-error">{{ bookingError }}</p>
 
       <div v-if="applicationStore.selectedUnit" class="surface reserved-card">
         <p class="reserved-card__label">Booked Unit</p>
@@ -240,7 +393,7 @@ onMounted(async () => {
             <button
               class="btn btn-primary"
               type="button"
-              :disabled="!canSelectUnit || applicationStore.status === 'selected'"
+              :disabled="!canSelectUnit || applicationStore.status === 'selected' || isSubmittingSelection"
               @click="openConfirmModal"
             >
               {{ applicationStore.status === 'selected' ? 'Reserved Under Your Name' : 'Book This Unit' }}
@@ -264,6 +417,8 @@ onMounted(async () => {
       :message="modalMessage"
       confirm-label="Book Unit"
       cancel-label="Cancel"
+      :processing="isSubmittingSelection"
+      processing-label="Preparing secure NETS checkout..."
       @close="closeConfirmModal"
       @confirm="confirmUnitSelection"
     />
