@@ -27,25 +27,25 @@ env/
 # SQLite and local DB artifacts
 *.sqlite
 *.sqlite3
-document/data/*
-!document/data/.gitkeep
+backend/document/data/*
+!backend/document/data/.gitkeep
 
-# --- Node / Vite frontend (hdb-frontend/) ---
-hdb-frontend/node_modules/
-hdb-frontend/dist/
-hdb-frontend/dist-ssr/
-hdb-frontend/coverage/
-hdb-frontend/logs/
-hdb-frontend/.eslintcache
-hdb-frontend/*.tsbuildinfo
-hdb-frontend/*.local
-hdb-frontend/cypress/videos/
-hdb-frontend/cypress/screenshots/
-hdb-frontend/__screenshots__/
-hdb-frontend/*.timestamp-*-*.mjs
-hdb-frontend/.vscode/*
-!hdb-frontend/.vscode/extensions.json
-hdb-frontend/package-lock.json
+# --- Node / Vite frontend (frontend/) ---
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/coverage/
+frontend/logs/
+frontend/.eslintcache
+frontend/*.tsbuildinfo
+frontend/*.local
+frontend/cypress/videos/
+frontend/cypress/screenshots/
+frontend/__screenshots__/
+frontend/*.timestamp-*-*.mjs
+frontend/.vscode/*
+!frontend/.vscode/extensions.json
+frontend/package-lock.json
 
 # Logs
 *.log
