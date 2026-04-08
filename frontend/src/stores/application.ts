@@ -126,20 +126,6 @@ const townByProjectId: Record<number, string> = Object.fromEntries(
   Object.entries(projectIdByTown).map(([town, projectId]) => [projectId, town]),
 ) as Record<number, string>
 
-const baseUnitTemplates = [
-  { unitNumber: '27-181', floor: 27, facing: 'Open View', sqm: 112, price: 512000 },
-  { unitNumber: '27-183', floor: 27, facing: 'Park', sqm: 112, price: 518000 },
-  { unitNumber: '27-185', floor: 27, facing: 'City', sqm: 112, price: 523000 },
-  { unitNumber: '24-171', floor: 24, facing: 'Garden', sqm: 101, price: 488000 },
-  { unitNumber: '24-173', floor: 24, facing: 'Courtyard', sqm: 101, price: 492000 },
-  { unitNumber: '24-175', floor: 24, facing: 'Open View', sqm: 101, price: 498000 },
-  { unitNumber: '21-161', floor: 21, facing: 'Waterfront', sqm: 93, price: 458000 },
-  { unitNumber: '21-163', floor: 21, facing: 'Park', sqm: 93, price: 463000 },
-  { unitNumber: '21-165', floor: 21, facing: 'City', sqm: 93, price: 468000 },
-  { unitNumber: '18-151', floor: 18, facing: 'Courtyard', sqm: 93, price: 438000 },
-  { unitNumber: '18-153', floor: 18, facing: 'Garden', sqm: 93, price: 444000 },
-  { unitNumber: '18-155', floor: 18, facing: 'Park', sqm: 93, price: 449000 },
-]
 
 function createDefaultForm(): ApplicationForm {
   return {
@@ -205,15 +191,6 @@ function buildQueueNumber(nric: string): string {
   return `Q${digits}`
 }
 
-function buildAvailableUnits(preferredTown: string): AvailableUnit[] {
-  const development = developmentByTown[preferredTown] ?? `${preferredTown} Residences`
-
-  return baseUnitTemplates.map((template, index) => ({
-    id: index + 1,
-    development,
-    ...template,
-  }))
-}
 
 function mapFlatServiceRowToUnit(row: {
   flat_id: number
@@ -378,13 +355,7 @@ export const useApplicationStore = defineStore('application', () => {
   const projectCatalog = ref<ProjectRecord[]>([])
   const isLoadingProjectCatalog = ref(false)
 
-  const availableUnits = computed(() => {
-    if (availableUnitsState.value.length > 0) {
-      return availableUnitsState.value
-    }
-
-    return buildAvailableUnits(form.value.preferredTown)
-  })
+  const availableUnits = computed(() => availableUnitsState.value)
   const projectByTown = computed(() => {
     const map = new Map<string, ProjectRecord>()
 
