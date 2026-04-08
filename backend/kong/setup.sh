@@ -6,6 +6,15 @@
 #   cd esd-hdb/backend
 #   docker compose up --build -d
 #   bash kong/setup.sh
+#!/usr/bin/env bash
+set -e
+
+# Load .env if it exists
+if [ -f "$(dirname "$0")/../.env" ]; then
+  set -a
+  source "$(dirname "$0")/../.env"
+  set +a
+fi
 
 ADMIN=http://localhost:8001
 ENABLE_PROCESS_BALLOT_KEY_AUTH=${ENABLE_PROCESS_BALLOT_KEY_AUTH:-true}
