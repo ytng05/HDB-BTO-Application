@@ -1,7 +1,6 @@
 ﻿"""HFE application service."""
 
 import os
-from datetime import date
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -30,120 +29,6 @@ swagger = Swagger(app)
 
 db = SQLAlchemy(app)
 
-SCENARIO_HFE_RECORDS = (
-    {
-        "main_applicant_nric": "S9401234L",
-        "main_applicant_name": "LENA ONG JIA HUI",
-        "co_applicant_nric": "S9601234S",
-        "co_applicant_name": "SARAH LIM MEI YEN",
-        "total_household_income": 5500.00,
-        "assessment_outcome": "ELIGIBLE",
-        "eligible_flat_types": "3-Room",
-        "application_scheme": "Public Scheme (Married Couple / Singapore Citizen)",
-        "hdb_loan_ceiling": 120000.00,
-        "total_grants_eligible": 55000.00,
-        "date_of_issue": "2026-01-15",
-        "valid_until": "2026-12-31",
-    },
-    {
-        "main_applicant_nric": "S9501234R",
-        "main_applicant_name": "RYAN TAN JIAN HUI",
-        "co_applicant_nric": "S9601234S",
-        "co_applicant_name": "SARAH LIM MEI YEN",
-        "total_household_income": 9800.00,
-        "assessment_outcome": "ELIGIBLE",
-        "eligible_flat_types": "4-Room, 5-Room",
-        "application_scheme": "Public Scheme (Married Couple / Singapore Citizen)",
-        "hdb_loan_ceiling": 270000.00,
-        "total_grants_eligible": 80000.00,
-        "date_of_issue": "2026-01-15",
-        "valid_until": "2026-12-31",
-    },
-    {
-        "main_applicant_nric": "S8901234D",
-        "main_applicant_name": "DANIEL GOH WEI MING",
-        "co_applicant_nric": "S9101234M",
-        "co_applicant_name": "MARCUS LIM CHENG WEI",
-        "total_household_income": 8500.00,
-        "assessment_outcome": "ELIGIBLE (3-Room only)",
-        "eligible_flat_types": "3-Room",
-        "application_scheme": "Public Scheme (Married Couple / Singapore Citizen)",
-        "hdb_loan_ceiling": 180000.00,
-        "total_grants_eligible": 35000.00,
-        "date_of_issue": "2026-01-15",
-        "valid_until": "2026-12-31",
-    },
-    {
-        "main_applicant_nric": "S9001234J",
-        "main_applicant_name": "JASMINE TAN SHU MIN",
-        "co_applicant_nric": "S9101234M",
-        "co_applicant_name": "MARCUS LIM CHENG WEI",
-        "total_household_income": 11000.00,
-        "assessment_outcome": "ELIGIBLE",
-        "eligible_flat_types": "4-Room, 5-Room",
-        "application_scheme": "Public Scheme (Married Couple / Singapore Citizen)",
-        "hdb_loan_ceiling": 270000.00,
-        "total_grants_eligible": 80000.00,
-        "date_of_issue": "2023-11-15",
-        "valid_until": "2024-06-30",
-    },
-    {
-        "main_applicant_nric": "S9201234W",
-        "main_applicant_name": "WENDY CHEN XIN HUI",
-        "co_applicant_nric": "S9501234R",
-        "co_applicant_name": "RYAN TAN JIAN HUI",
-        "total_household_income": 4200.00,
-        "assessment_outcome": "ELIGIBLE",
-        "eligible_flat_types": "2-Room Flexi, 3-Room",
-        "application_scheme": "Public Scheme (Married Couple / Singapore Citizen)",
-        "hdb_loan_ceiling": 135000.00,
-        "total_grants_eligible": 55000.00,
-        "date_of_issue": "2026-01-15",
-        "valid_until": "2026-12-31",
-    },
-    {
-        "main_applicant_nric": "S9912364H",
-        "main_applicant_name": "VENKATA NARASIMHA RAJUVARIPET S/O ABHAYANANDA",
-        "co_applicant_nric": None,
-        "co_applicant_name": None,
-        "total_household_income": 3056.50,
-        "assessment_outcome": "ELIGIBLE",
-        "eligible_flat_types": "2-Room Flexi",
-        "application_scheme": "Single Singapore Citizen (SSC) Scheme",
-        "hdb_loan_ceiling": 135000.00,
-        "total_grants_eligible": 55000.00,
-        "date_of_issue": "2026-04-01",
-        "valid_until": "2027-03-31",
-    },
-    {
-        "main_applicant_nric": "S9812381D",
-        "main_applicant_name": "TAN HENG HUAT",
-        "co_applicant_nric": "G1612350T",
-        "co_applicant_name": "JENNY LIM WAI FOOK",
-        "total_household_income": 9866.67,
-        "assessment_outcome": "ELIGIBLE",
-        "eligible_flat_types": "4-Room, 5-Room",
-        "application_scheme": "Public Scheme (Married Couple)",
-        "hdb_loan_ceiling": 550000.00,
-        "total_grants_eligible": 80000.00,
-        "date_of_issue": "2026-04-01",
-        "valid_until": "2027-03-31",
-    },
-    {
-        "main_applicant_nric": "S9912374E",
-        "main_applicant_name": "TIMOTHY TAN CHENG GUAN",
-        "co_applicant_nric": "G1612350T",
-        "co_applicant_name": "JENNY LIM WAI FOOK",
-        "total_household_income": 10925.00,
-        "assessment_outcome": "ELIGIBLE",
-        "eligible_flat_types": "3-Room, 4-Room, 5-Room",
-        "application_scheme": "Public Scheme (Married Couple)",
-        "hdb_loan_ceiling": 550000.00,
-        "total_grants_eligible": 80000.00,
-        "date_of_issue": "2026-04-01",
-        "valid_until": "2027-03-31",
-    },
-)
 
 
 class HfeApplication(db.Model):
@@ -191,33 +76,6 @@ class HfeApplication(db.Model):
         }
 
 
-#  Handles upsert scenario hfe records for this service.
-def upsert_scenario_hfe_records():
-    for seed in SCENARIO_HFE_RECORDS:
-        query = db.select(HfeApplication).where(
-            HfeApplication.main_applicant_nric == seed["main_applicant_nric"]
-        )
-        record = db.session.scalar(query)
-
-        if record is None:
-            record = HfeApplication(main_applicant_nric=seed["main_applicant_nric"])
-            db.session.add(record)
-
-        record.main_applicant_name = seed["main_applicant_name"]
-        record.co_applicant_nric = seed["co_applicant_nric"]
-        record.co_applicant_name = seed["co_applicant_name"]
-        record.total_household_income = seed["total_household_income"]
-        record.assessment_outcome = seed["assessment_outcome"]
-        record.eligible_flat_types = seed["eligible_flat_types"]
-        record.application_scheme = seed["application_scheme"]
-        record.hdb_loan_ceiling = seed["hdb_loan_ceiling"]
-        record.total_grants_eligible = seed["total_grants_eligible"]
-        record.date_of_issue = date.fromisoformat(seed["date_of_issue"])
-        record.valid_until = date.fromisoformat(seed["valid_until"])
-
-    db.session.commit()
-
-
 #  Handles get hfe applications for this service.
 @app.route("/hfe-applications", methods=["GET"])
 def get_hfe_applications():
@@ -255,8 +113,6 @@ def get_hfe_applications():
     return jsonify(row.to_dict())
 
 
-if __name__ == "__main__":
-    with app.app_context():
-        upsert_scenario_hfe_records()
 
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5009, debug=False)
