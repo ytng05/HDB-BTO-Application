@@ -12,6 +12,8 @@ import { useAuth } from '@/stores/auth'
 import { useApplicationStore } from '@/stores/application'
 import { validateSession } from '@/services/myinfo'
 import { pinia } from '@/stores/pinia'
+// Simple admin state (shared with NavBar)
+import { isAdmin } from '@/stores/admin'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -113,7 +115,7 @@ const router = createRouter({
       name: 'admin-ballot',
       component: AdminBallotView,
       meta: {
-        requiresAuth: true,
+        requiresAdmin: true,
       },
     },
     {
@@ -127,6 +129,12 @@ router.beforeEach(async (to) => {
   const { isLoggedIn, restoreSession, logout } = useAuth()
   const applicationStore = useApplicationStore(pinia)
   restoreSession()
+
+  if (to.meta.requiresAdmin) {
+    if (!isAdmin.value) {
+      return { path: '/' }
+    }
+  }
 
   if (to.meta.requiresAuth) {
     if (!isLoggedIn.value) {

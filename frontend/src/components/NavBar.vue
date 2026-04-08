@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { isAdmin } from '@/stores/admin'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { LogIn, LogOut, UserRound } from 'lucide-vue-next'
 import { useAuth } from '@/stores/auth'
@@ -48,18 +49,38 @@ function confirmRedirectToMockPass() {
 }
 
 const navLinks = computed(() => {
-  if (!isLoggedIn.value) return []
-
-  return [
-    { id: 'dashboard', label: 'Dashboard', to: { path: '/', hash: '#dashboard' } },
-    { id: 'admin-ballot', label: 'Admin Ballot', to: { path: '/admin/ballot' } },
-  ]
+  if (isLoggedIn.value) {
+    return [
+      { id: 'dashboard', label: 'Dashboard', to: { path: '/', hash: '#dashboard' } },
+    ]
+  }
+  if (isAdmin.value) {
+    return [
+      { id: 'admin-ballot', label: 'Admin Ballot', to: { path: '/admin/ballot' } },
+    ]
+  }
+  return []
 })
 
 function isActiveLink(linkId: string) {
   if (linkId === 'dashboard') return router.currentRoute.value.path === '/'
   if (linkId === 'admin-ballot') return router.currentRoute.value.path === '/admin/ballot'
   return false
+}
+
+function openAdminLogin() {
+  const pw = window.prompt('Enter admin password:')
+  if (pw === 'admin123') {
+    isAdmin.value = true
+    router.push('/admin/ballot')
+  } else if (pw !== null) {
+    window.alert('Incorrect password')
+  }
+}
+
+function handleAdminLogout() {
+  isAdmin.value = false
+  router.push('/')
 }
 
 async function handleLogout() {
@@ -108,10 +129,25 @@ async function handleLogout() {
             <LogOut :size="17" />
           </button>
         </template>
-        <button v-else class="nav-login" type="button" :disabled="isRedirectingToSingpass" @click="openLoginConfirm">
-          <LogIn :size="17" />
-          <span>{{ isRedirectingToSingpass ? 'Connecting...' : 'Login' }}</span>
-        </button>
+        <template v-else-if="isAdmin">
+          <span class="user-pill">
+            <UserRound :size="16" />
+            <span>Admin</span>
+          </span>
+          <button class="nav-logout" type="button" aria-label="Logout" @click="handleAdminLogout">
+            <LogOut :size="17" />
+          </button>
+        </template>
+        <template v-else>
+          <button class="nav-login" type="button" :disabled="isRedirectingToSingpass" @click="openLoginConfirm">
+            <LogIn :size="17" />
+            <span>{{ isRedirectingToSingpass ? 'Connecting...' : 'Login' }}</span>
+          </button>
+          <button class="nav-login" type="button" @click="openAdminLogin" style="margin-left: 8px;">
+            <LogIn :size="17" />
+            <span>Admin Login</span>
+          </button>
+        </template>
       </div>
     </div>
   </header>
