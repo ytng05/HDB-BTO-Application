@@ -103,7 +103,8 @@ create_route   "flat-selection" "flat-selection-list-route"        "/flat-select
 create_service "application"    "http://application-service:5004"
 create_route   "application"    "application-list-route"           "/applications"                            '["GET","OPTIONS"]'
 
-create_service "flat-allocation" "http://10.43.13.132:5016"
+FLAT_ALLOCATION_URL=${FLAT_ALLOCATION_URL:-http://flat-allocation-service:5005}
+create_service "flat-allocation" "$FLAT_ALLOCATION_URL"
 create_route   "flat-allocation" "flat-allocation-select-route"    "/select-flat"                            '["POST","OPTIONS"]'
 create_route   "flat-allocation" "flat-allocation-initiate-route"  "/select-flat/initiate"                   '["POST","OPTIONS"]'
 create_route   "flat-allocation" "flat-allocation-complete-route"  "~/select-flat/complete/[^/]+$"          '["POST","OPTIONS"]'

@@ -1,6 +1,7 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 
 const STORAGE_KEY = 'hdb-flat-portal-auth'
+const APPLICATION_STORAGE_KEY = 'hdb-flat-portal-application'
 
 interface StoredAuthSession {
   applicant_id: number
@@ -37,9 +38,29 @@ function restoreSession() {
 }
 
 function login(id: number, name: string, nric: string | null = null) {
+  const newNric = nric ? nric.trim().toUpperCase() : null
+
+  // If a different user previously used this browser, wipe their cached application state
+  if (typeof window !== 'undefined') {
+    try {
+      const prev = window.localStorage.getItem(APPLICATION_STORAGE_KEY)
+      if (prev) {
+        const parsed = JSON.parse(prev)
+        const prevNric = typeof parsed?.form?.nric === 'string'
+          ? parsed.form.nric.trim().toUpperCase()
+          : null
+        if (prevNric && prevNric !== newNric) {
+          window.localStorage.removeItem(APPLICATION_STORAGE_KEY)
+        }
+      }
+    } catch {
+      window.localStorage.removeItem(APPLICATION_STORAGE_KEY)
+    }
+  }
+
   applicantId.value = id
   applicantName.value = name
-  applicantNric.value = nric ? nric.trim().toUpperCase() : null
+  applicantNric.value = newNric
 
   if (typeof window !== 'undefined') {
     const session: StoredAuthSession = {
@@ -59,6 +80,7 @@ function logout() {
 
   if (typeof window !== 'undefined') {
     window.sessionStorage.removeItem(STORAGE_KEY)
+    window.localStorage.removeItem(APPLICATION_STORAGE_KEY)
   }
 }
 
