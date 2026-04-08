@@ -355,13 +355,17 @@ async function runManualBallot() {
     if (status !== 201 || !data.data?.audit_id) {
       const fallback = typeof data.message === 'string' ? data.message : 'Unable to create manual audit record.'
       errorMessage.value = fallback
+      isRunning.value = false
       return
     }
 
-    await executeBallot(manualExerciseId.value, data.data.audit_id, `manual:${data.data.audit_id}`)
+    // Immediately show OK after sending the request
+    message.value = 'Ballot execution started.'
+    isRunning.value = false
+    // Optionally, fire and forget the actual execution
+    executeBallot(manualExerciseId.value, data.data.audit_id, `manual:${data.data.audit_id}`)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Unable to execute ballot run.'
-  } finally {
     isRunning.value = false
   }
 }
