@@ -362,8 +362,9 @@ async function runManualBallot() {
     // Immediately show OK after sending the request
     message.value = 'Ballot execution started.'
     isRunning.value = false
-    // Optionally, fire and forget the actual execution
+    // Fire and forget the actual execution, suppressing any errors
     executeBallot(manualExerciseId.value, data.data.audit_id, `manual:${data.data.audit_id}`)
+      .catch(() => {/* ignore errors to avoid timeout message */})
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Unable to execute ballot run.'
     isRunning.value = false
