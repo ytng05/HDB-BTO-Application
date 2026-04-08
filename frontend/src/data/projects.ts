@@ -25,24 +25,34 @@ export interface ProjectLookupRecord {
   town_name: string
 }
 
+export const projectImageById: Record<number, string> = {
+  40: 'https://upload.wikimedia.org/wikipedia/commons/d/da/Tengah_Singapore_HDB_20240529_143609.jpg',
+  41: 'https://static1.straitstimes.com.sg/s3fs-public/articles/2018/08/31/colin-ww3-31.jpg?VersionId=FuYN2nCESRMZ7drr3ec6zPLyTKIf869g&w=900',
+  42: 'https://upload.wikimedia.org/wikipedia/commons/d/dd/Block_45_Stirling_Road%2C_Singapore.jpg',
+  43: 'https://upload.wikimedia.org/wikipedia/commons/4/4b/%28SGP-Singapore%29_Kallang_Horizon_HDB_blocks_under_construction_2024-02-16.jpg',
+}
+
+export const defaultProjectImage =
+  'https://upload.wikimedia.org/wikipedia/commons/d/da/Tengah_Singapore_HDB_20240529_143609.jpg'
+
 export const heroSlides: HeroSlide[] = [
   {
     title: 'Tengah Garden Walk',
     town: 'Tengah',
     topDate: 'Q4 2028',
-    image: 'https://picsum.photos/1400/600?random=1',
+    image: projectImageById[40] ?? defaultProjectImage,
   },
   {
     title: 'Kallang RiverFront',
     town: 'Kallang/Whampoa',
     topDate: 'Q2 2029',
-    image: 'https://picsum.photos/1400/600?random=2',
+    image: projectImageById[43] ?? defaultProjectImage,
   },
   {
     title: 'Queenstown SkyGrove',
     town: 'Queenstown',
     topDate: 'Q1 2028',
-    image: 'https://picsum.photos/1400/600?random=3',
+    image: projectImageById[42] ?? defaultProjectImage,
   },
 ]
 

@@ -117,7 +117,6 @@ services:
       SHOW_LOGIN_PAGE: "true"
       MOCKPASS_STATELESS: "true"
       MYINFO_V3_PATH: /app/v3.json
-      # MyInfo v3 Configuration - Use test certificates from npm package (local install)
       SERVICE_PROVIDER_CERT_PATH: /app/node_modules/@opengovsg/mockpass/static/certs/server.crt
       SERVICE_PROVIDER_PUB_KEY: /app/node_modules/@opengovsg/mockpass/static/certs/key.pub
       SERVICE_PROVIDER_MYINFO_SECRET: test-secret-key
@@ -136,7 +135,6 @@ services:
       MOCKPASS_BROWSER_URL: http://localhost:5156
       MOCKPASS_AUTH_PATH: /singpass/v2/auth
       MOCKPASS_CLIENT_ID: hdb-flat-portal
-      # Enable session management: true | false
       ENABLE_SESSIONS: "true"
       SESSION_TIMEOUT_MINUTES: 60
       AUTH_STATE_TIMEOUT_SECONDS: 300
@@ -245,31 +243,6 @@ services:
       NETS_IP_ADDRESS: ${NETS_IP_ADDRESS:-}
       NETS_MERCHANT_TIMEZONE: ${NETS_MERCHANT_TIMEZONE:-+8:00}
       HDB_PORTAL_URL: ${HDB_PORTAL_URL:-http://localhost:5173}
-    restart: always
-
-  flat-allocation-service:
-    build:
-      context: ./flat_allocation
-      dockerfile: Dockerfile
-    container_name: flat_allocation_service
-    ports:
-      - "5016:5005"
-    environment:
-      FLAT_AVAILABILITY_URL: http://flat-service:5006
-      APPLICANT_URL: http://application-service:5004
-      FLAT_SELECTION_URL: http://flat-selection-service:5002
-      NETS_PAYMENT_URL: http://nets-payment-service:5003
-      NOTIFICATION_URL: http://notification-api:5000
-      NOTIFICATION_QUEUE_NAME: hdb_notification_queue
-      RABBITMQ_HOST: ${RABBITMQ_HOST:-localhost}
-      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
-      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-}
-      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-}
-      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
-    depends_on:
-      - flat-selection-service
-      - nets-payment-service
-      - notification-api
     restart: always
 
   # Notification Service — RabbitMQ wrapper API

@@ -1001,27 +1001,56 @@ export const useApplicationStore = defineStore('application', () => {
   }
 
   async function loadAvailableUnits() {
-    // Load project catalog in the background so flat availability can render immediately
-    // using fallback project mappings when the upstream project service is slow.
+    console.log('[loadAvailableUnits] called', {
+      preferredTown: form.value.preferredTown,
+      currentApplicationId: currentApplicationId.value,
+      linkedAppsCount: linkedApplications.value.length,
+    })
     void ensureProjectCatalogLoaded()
+    
 
-    const preferredTown = form.value.preferredTown
-    if (!hasText(preferredTown)) {
+    // Fallback: if preferredTown is empty (e.g. user navigated directly to
+    // /select-flat from an existing application), derive it from the currently
+    // linked application so we can still query flats by project_id.
+    let preferredTown = form.value.preferredTown
+    let fallbackProjectId: number | undefined
+    let fallbackFlatType: string | undefined
+
+    if (!hasText(preferredTown) && currentApplicationId.value !== null) {
+      const activeApp = linkedApplications.value.find(
+        (app) => app.application_id === currentApplicationId.value,
+      )
+      if (activeApp) {
+        fallbackProjectId = activeApp.project_id
+        fallbackFlatType = activeApp.flat_type
+        preferredTown =
+          projectCatalog.value.find((p) => p.project_id === activeApp.project_id)?.town_name
+          ?? ''
+      }
+    }
+
+    if (!hasText(preferredTown) && fallbackProjectId === undefined) {
       availableUnitsState.value = []
       return
     }
 
-    const params: { town?: string; flat_type?: string; project_id?: number } = {
-      town: preferredTown,
+    const params: { town?: string; flat_type?: string; project_id?: number } = {}
+
+    if (hasText(preferredTown)) {
+      params.town = preferredTown
+      const resolvedProject = resolvePreferredProject(preferredTown)
+      if (resolvedProject) {
+        params.project_id = resolvedProject.project_id
+      }
     }
 
-    const resolvedProject = resolvePreferredProject(preferredTown)
-    if (resolvedProject) {
-      params.project_id = resolvedProject.project_id
+    if (fallbackProjectId !== undefined) {
+      params.project_id = fallbackProjectId
     }
 
-    if (hasText(form.value.flatType)) {
-      params.flat_type = form.value.flatType
+    const flatType = hasText(form.value.flatType) ? form.value.flatType : (fallbackFlatType ?? '')
+    if (hasText(flatType)) {
+      params.flat_type = flatType
     }
 
     isLoadingAvailableUnits.value = true

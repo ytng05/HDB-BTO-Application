@@ -182,12 +182,20 @@ async function confirmUnitSelection() {
       throw new Error('No balloted or selecting flat selection record is available for this applicant.')
     }
 
-    const bookingResponse = await selectFlatAllocation({
-      applicant_id: nric,
-      selection_id: selectionId,
-      flat_id: focusedUnit.value.id,
-      payment_amount: 10,
-    })
+    const bookingResponse = await Promise.race([
+      selectFlatAllocation({
+        applicant_id: nric,
+        selection_id: selectionId,
+        flat_id: focusedUnit.value.id,
+        payment_amount: 10,
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error('Flat allocation service is unreachable. Please try again later.')),
+          10000,
+        ),
+      ),
+    ])
 
     if (bookingResponse.status !== 200 || !bookingResponse.data.data) {
       const message = normaliseMessage(
@@ -239,6 +247,33 @@ function showToast(message: string) {
 
 onMounted(async () => {
   loadError.value = ''
+
+  // Hydrate store from backend if empty (user may have navigated directly
+  // to /select-flat without going through HomeView first).
+  if (applicationStore.linkedApplications.length === 0 && applicantNric.value) {
+    try {
+      const { fetchApplications } = await import('@/services/api')
+      const { status, data } = await fetchApplications({
+        main_applicant_nric: applicantNric.value,
+      })
+      if (status === 200 && Array.isArray(data.applications)) {
+        applicationStore.replaceLinkedApplicationsForNric(
+          applicantNric.value,
+          data.applications,
+        )
+      }
+    } catch (err) {
+      console.warn('Failed to hydrate applications:', err)
+    }
+  }
+
+  // Pick the active (SUCCESSFUL) application and open it so currentApplicationId is set
+  const activeApp = applicationStore.linkedApplications.find(
+    (a) => a.application_status === 'SUCCESSFUL',
+  )
+  if (activeApp) {
+    applicationStore.openApplication(activeApp)
+  }
 
   socket.value = new WebSocket('ws://localhost:5017')
 

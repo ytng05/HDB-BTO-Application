@@ -5,7 +5,7 @@ import { Building2, FileText, MapPinned, UserRound } from 'lucide-vue-next'
 import HeroCarousel from '@/components/HeroCarousel.vue'
 import BtoProjectCard from '@/components/BtoProjectCard.vue'
 import ApplicationStatusStepper from '@/components/ApplicationStatusStepper.vue'
-import { getProjectName, getProjectTown, heroSlides, syncProjectLookup, upcomingProjects, type UpcomingProject } from '@/data/projects'
+import { getProjectName, getProjectTown, heroSlides, syncProjectLookup, upcomingProjects, projectImageById, defaultProjectImage, type UpcomingProject } from '@/data/projects'
 import { useApplicationStore } from '@/stores/application'
 import { useAuth } from '@/stores/auth'
 import {  
@@ -531,7 +531,7 @@ function toCard(project: ProjectRecord) {
     flatTypes: project.flat_types,
     openDate: openLabel,
     closeDate: `Exercise ${project.exercise_id}`,
-    image: `https://picsum.photos/seed/project-${project.project_id}/1200/700`,
+    image: projectImageById[project.project_id] ?? defaultProjectImage,
   }
 }
 
