@@ -252,6 +252,12 @@ services:
     container_name: notification_api
     ports:
       - "5015:5000"
+    environment:
+      RABBITMQ_HOST: ${RABBITMQ_HOST}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
     restart: always
 
   # Notification Service — RabbitMQ consumer + Twilio SMS
@@ -261,12 +267,17 @@ services:
       dockerfile: Dockerfile.consumer
     container_name: notification_consumer
     environment:
-      NOTIFICATION_QUEUE_NAME: hdb_notification_queue
+      NOTIFICATION_QUEUE_NAME: ${NOTIFICATION_QUEUE_NAME:-hdb_notification_queue}
       RABBITMQ_HOST: ${RABBITMQ_HOST}
       RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
       RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER}
     restart: always
 
   ballot-audit-db:
