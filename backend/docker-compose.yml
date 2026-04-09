@@ -375,6 +375,29 @@ services:
       - notification-api
     restart: always
 
+  # Check Forfeit Service — Scenario 3B
+  check-forfeit-service:
+    build:
+      context: ./services/check_forfeit
+      dockerfile: Dockerfile
+    container_name: check_forfeit_service
+    ports:
+      - "5012:5012"
+    environment:
+      FLAT_SELECTION_SERVICE_URL: http://flat-selection-service:5002
+      APPLICATION_SERVICE_URL: http://application-service:5004
+      NOTIFICATION_SERVICE_URL: http://notification-api:5000
+      NOTIFICATION_QUEUE_NAME: hdb_notification_queue
+      RESERVATION_DEADLINE_HOURS: ${RESERVATION_DEADLINE_HOURS:-24}
+      REQUEST_TIMEOUT_SECONDS: 20
+      CRON_HOUR: ${FORFEIT_CRON_HOUR:-23}
+      CRON_MINUTE: ${FORFEIT_CRON_MINUTE:-59}
+    depends_on:
+      - flat-selection-service
+      - application-service
+      - notification-api
+    restart: always
+
   # Monitoring Stack
   prometheus:
     image: prom/prometheus:v3.1.0

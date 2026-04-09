@@ -141,6 +141,8 @@ def callback(ch, method, properties, body):
             subject = custom_subject or "Payment Failed - Please Retry"
         elif event_type == "FlatBookingQueueAssigned":
             subject = custom_subject or "Flat Selection Queue Number and Appointment Time"
+        elif event_type == "FlatReservationForfeited":
+            subject = custom_subject or "Your Flat Reservation Has Been Forfeited"
         else:
             subject = custom_subject or "BTO Notification"
 

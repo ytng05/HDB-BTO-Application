@@ -108,6 +108,8 @@ These scenarios use **actual personas from MockPass v3.json** test data, not fic
 ```
 1. Click "Login"
    → Select S9912364H from MockPass dropdown
+   → number: 92739537
+   → email: xjinhx@gmail.com
    → Or enter manually
 
 2. Auth Callback
