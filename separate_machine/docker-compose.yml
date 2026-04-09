@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: flat_allocation_service
     ports:
-      - "5012:5005"
+      - "5014:5005"
     environment:
       FLAT_AVAILABILITY_URL: http://${MACHINE_A_IP}:5006
       APPLICANT_URL: http://${MACHINE_A_IP}:5004
