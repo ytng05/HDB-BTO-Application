@@ -383,6 +383,8 @@ services:
       NOTIFICATION_SERVICE_URL: http://notification-api:5000
       NOTIFICATION_QUEUE_NAME: hdb_notification_queue
       REQUEST_TIMEOUT_SECONDS: 20
+      ADMIN_ALERT_EMAIL: ${ADMIN_ALERT_EMAIL}
+      ADMIN_ALERT_MOBILE: ${ADMIN_ALERT_MOBILE}
     depends_on:
       - application-service
       - validate-eligibility-service
