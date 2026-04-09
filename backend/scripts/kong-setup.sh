@@ -133,7 +133,7 @@ create_route   "flat-selection" "flat-selection-list-route"        "/flat-select
 create_service "application"    "$APPLICATION_SERVICE_URL"
 create_route   "application"    "application-list-route"           "/applications"                            '["GET","OPTIONS"]'
 
-FLAT_ALLOCATION_URL=${FLAT_ALLOCATION_URL:-http://ballot-service:5005}
+FLAT_ALLOCATION_URL=${FLAT_ALLOCATION_URL:-http://localhost:5005}
 create_service "flat-allocation" "$FLAT_ALLOCATION_URL"
 create_route   "flat-allocation" "flat-allocation-select-route"    "/select-flat"                            '["POST","OPTIONS"]'
 create_route   "flat-allocation" "flat-allocation-initiate-route"  "/select-flat/initiate"                   '["POST","OPTIONS"]'

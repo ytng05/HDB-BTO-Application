@@ -1,0 +1,17 @@
+services:
+  flat-allocation-service:
+    build:
+      context: ./flat_allocation
+      dockerfile: Dockerfile
+    container_name: flat_allocation_service
+    ports:
+      - "5012:5005"
+    environment:
+      FLAT_AVAILABILITY_URL: http://${MACHINE_A_IP}:5006
+      APPLICANT_URL: http://${MACHINE_A_IP}:5004
+      FLAT_SELECTION_URL: http://${MACHINE_A_IP}:5002
+      NETS_PAYMENT_URL: http://${MACHINE_A_IP}:5003
+      NOTIFICATION_URL: http://${MACHINE_A_IP}:5015
+      NOTIFICATION_QUEUE_NAME: hdb_notification_queue
+      REQUEST_TIMEOUT_SECONDS: 20
+    restart: always
